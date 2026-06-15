@@ -113,6 +113,20 @@ final class SidebarUITests: XCTestCase {
                       "session should move to workspace 2 via drag-and-drop")
     }
 
+    func testNewSessionButton() throws {
+        XCTAssertTrue(sessionRow().waitForExistence(timeout: 20), "seeded session should exist")
+        // bottom-bar add-session menu (a SwiftUI Menu may surface as a popup, not a
+        // plain button), matched by identifier across element types.
+        let add = app.descendants(matching: .any).matching(identifier: "add-session").firstMatch
+        XCTAssertTrue(add.waitForExistence(timeout: 5), "bottom-bar add-session menu should exist")
+        add.click()
+        let newItem = app.menuItems["New Session"]
+        XCTAssertTrue(newItem.waitForExistence(timeout: 5), "New Session menu item should appear")
+        newItem.click()
+        XCTAssertTrue(pollSessionCount(workspace: "workspace 1", expected: 2, timeout: 5),
+                      "workspace 1 should have 2 sessions after add-session -> New Session")
+    }
+
     /// Polls the hermetic snapshot file until the named workspace has `expected` sessions.
     private func pollSessionCount(workspace name: String, expected: Int, timeout: TimeInterval) -> Bool {
         let file = stateDir.appendingPathComponent("workspaces.json")

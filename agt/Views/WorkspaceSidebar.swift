@@ -358,6 +358,10 @@ struct WorkspaceSidebar: NSViewRepresentable {
                 newSession.target = self
                 newSession.representedObject = node
                 menu.addItem(newSession)
+                let openSession = NSMenuItem(title: "Open Directory…", action: #selector(menuOpenSession(_:)), keyEquivalent: "")
+                openSession.target = self
+                openSession.representedObject = node
+                menu.addItem(openSession)
             }
             return menu
         }
@@ -393,7 +397,31 @@ struct WorkspaceSidebar: NSViewRepresentable {
 
         @objc private func menuNewSession(_ sender: NSMenuItem) {
             guard let node = sender.representedObject as? SidebarNode else { return }
-            store.addSession(toWorkspace: node.id, cwd: FileManager.default.homeDirectoryForCurrentUser.path)
+            addSession(toWorkspace: node.id, cwd: FileManager.default.homeDirectoryForCurrentUser.path)
+        }
+
+        /// "Open Directory…": pick a folder and add a session rooted there.
+        @objc private func menuOpenSession(_ sender: NSMenuItem) {
+            guard let node = sender.representedObject as? SidebarNode else { return }
+            openDirectoryAndAddSession(toWorkspace: node.id)
+        }
+
+        /// Adds a session to `workspaceID` at `cwd` and selects it.
+        private func addSession(toWorkspace workspaceID: UUID, cwd: String) {
+            if let session = store.addSession(toWorkspace: workspaceID, cwd: cwd) {
+                store.selectSession(session.id)
+            }
+        }
+
+        private func openDirectoryAndAddSession(toWorkspace workspaceID: UUID) {
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            panel.allowsMultipleSelection = false
+            panel.prompt = "Open"
+            panel.message = "Choose a directory for the new session"
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            addSession(toWorkspace: workspaceID, cwd: url.path)
         }
 
         // MARK: - Drag and drop
