@@ -194,11 +194,13 @@ struct ContentView: View {
         .accessibilityIdentifier("quick-terminal-toggle")
     }
 
-    /// The quick-terminal overlay: the scratch terminal centered at 90% of the window, floating on
-    /// its shadow over the (undimmed) content. The margin is a transparent tap-catcher that
-    /// dismisses on click — no darkening, because the overlay can't cover the AppKit title bar, so a
-    /// dim would shade the body but not the chrome. Rendered only while visible; the surface it
-    /// hosts is owned by the controller, so hiding keeps the shell alive.
+    /// The quick-terminal overlay: the scratch terminal centered at 90% of the window, framed by a
+    /// hairline border and shadow so it reads as a distinct floating window over the (undimmed)
+    /// content. libghostty renders only the terminal content, so the frame is drawn here. The margin
+    /// is a transparent tap-catcher that dismisses on click — no darkening, because the overlay
+    /// can't cover the AppKit title bar, so a dim would shade the body but not the chrome. Rendered
+    /// only while visible; the surface it hosts is owned by the controller, so hiding keeps the
+    /// shell alive.
     @ViewBuilder private var quickTerminalOverlay: some View {
         if quickTerminal.isVisible {
             GeometryReader { geo in
@@ -209,6 +211,10 @@ struct ContentView: View {
                     QuickTerminalPane()
                         .frame(width: geo.size.width * 0.9, height: geo.size.height * 0.9)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                        )
                         .shadow(radius: 24)
                         .accessibilityIdentifier("quick-terminal")
                 }
