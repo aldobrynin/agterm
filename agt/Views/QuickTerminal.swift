@@ -30,6 +30,8 @@ final class QuickTerminalController {
     /// Toolbar-button action: show if hidden, hide if visible.
     func toggle() { isVisible.toggle() }
 
+    func show() { isVisible = true }
+
     func hide() { isVisible = false }
 
     /// The existing quick-terminal surface, or nil — does NOT create one (unlike `surface()`), so

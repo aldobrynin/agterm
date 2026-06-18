@@ -112,6 +112,64 @@ final class GhosttySurfaceView: NSView, TerminalSurface {
         onExit?()
     }
 
+    /// Types `text` into this surface's pty (the control channel's `session.type`) as literal keystrokes,
+    /// the same path the keyboard uses (`ghostty_surface_key` with `.text` set — see `insertText`). It does
+    /// NOT use `ghostty_surface_text`, which wraps writes in bracketed-paste escapes that both suppress
+    /// command execution and leak `\e[200~`/`\e[201~` markers when fired rapidly. Printable runs are sent as
+    /// key-with-text events; every line ending (`\n`, `\r`, or `\r\n`) is a real Return keypress, so a
+    /// trailing newline submits the command and a multi-line payload runs line by line. The bytes are
+    /// copied via `withCString`, so no buffer must outlive the call. A no-op when the surface has not been
+    /// created yet (a never-shown session); the caller realizes it first.
+    func inject(text: String) {
+        guard let surface else { return }
+        // normalize all line endings to \n so each becomes exactly one Return keypress.
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+        let segments = normalized.components(separatedBy: "\n")
+        for (index, segment) in segments.enumerated() {
+            if !segment.isEmpty {
+                segment.withCString { ptr in
+                    var ke = ghostty_input_key_s()
+                    ke.action = GHOSTTY_ACTION_PRESS
+                    ke.text = ptr
+                    _ = ghostty_surface_key(surface, ke)
+                }
+            }
+            // a newline separated this segment from the next → press Enter.
+            if index < segments.count - 1 {
+                sendReturn(to: surface)
+            }
+        }
+    }
+
+    /// Returns this surface's current selection text (the control channel's `session.copy`), or nil when
+    /// there is no selection or the surface has not been created yet. The selection is a property of the
+    /// surface's terminal state, independent of focus, so any realized session can be read. The libghostty
+    /// buffer is copied into a Swift `String` and freed via `ghostty_surface_free_text` before returning.
+    func readSelection() -> String? {
+        guard let surface, ghostty_surface_has_selection(surface) else { return nil }
+        var t = ghostty_text_s()
+        guard ghostty_surface_read_selection(surface, &t) else { return nil }
+        defer { ghostty_surface_free_text(surface, &t) }
+        guard let ptr = t.text, t.text_len > 0 else { return nil }
+        return String(decoding: UnsafeRawBufferPointer(start: ptr, count: Int(t.text_len)), as: UTF8.self)
+    }
+
+    /// Synthesizes a Return keypress (press + release) on `surface` via the same key path the keyboard
+    /// uses, so the shell treats it as Enter. Keycode 36 is the macOS virtual keycode for Return.
+    private func sendReturn(to surface: ghostty_surface_t) {
+        var ke = ghostty_input_key_s()
+        ke.keycode = 36
+        ke.mods = GHOSTTY_MODS_NONE
+        ke.consumed_mods = GHOSTTY_MODS_NONE
+        ke.composing = false
+        ke.text = nil
+        ke.unshifted_codepoint = 0
+        ke.action = GHOSTTY_ACTION_PRESS
+        _ = ghostty_surface_key(surface, ke)
+        ke.action = GHOSTTY_ACTION_RELEASE
+        _ = ghostty_surface_key(surface, ke)
+    }
+
     /// Triggers a libghostty keybind action on this surface (e.g. `increase_font_size:1`,
     /// `decrease_font_size:1`, `reset_font_size`), so a menu item can drive the same behavior
     /// as the built-in keybind. A font change rides the usual CELL_SIZE → persist path.

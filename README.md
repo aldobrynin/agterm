@@ -55,6 +55,51 @@ xcodebuild test -project agt.xcodeproj -scheme agt -destination 'platform=macOS'
 - A Settings window (Cmd+,) with **General**, **Appearance**, and **Key Mapping** tabs (General and Key Mapping are placeholders for now). **Appearance** sets the terminal font family, default font size, and ghostty theme (any of the 512 bundled themes); changes persist and apply live to open terminals. Applying an appearance change resets per-session cmd-+/- zoom to the default.
 - Auto-persist on every change and on quit; restore the tree, names, selection, each session's working directory and font size, the split state, and the status-bar visibility on the next launch.
 
+## Scripting agt
+
+`agt` can be driven from a script over a local unix-domain socket through a companion CLI, `agtctl`. This is for personal scripting — fire-and-forget commands that manage workspaces and sessions, inject text, and invoke control actions. There is no terminal-output streaming and no event subscription.
+
+`agtctl` lives in the `agtCore` Swift package and builds without Xcode or libghostty:
+
+```sh
+cd agtCore && swift build -c release
+# the binary is at agtCore/.build/release/agtctl
+```
+
+Each command targets a session or workspace by its UUID, a unique prefix of that UUID (git-style), or the keyword `active` (the selected session / current workspace). `--target` defaults to `active`, so the current one rarely needs to be named. Mutating commands print the affected id; `tree` prints the workspace and session tree. Add `--json` for the raw response, or `--socket PATH` to override the socket path. The exit code is zero on success, non-zero on error.
+
+`--workspace`/`--target` take an id, a unique id prefix, or `active` — never a name. To create a workspace and then open a session in it, capture the printed id:
+
+```sh
+agtctl tree                                   # print the workspace/session tree with ids
+ws=$(agtctl workspace new work)               # create a workspace, capture its id
+agtctl session new --workspace "$ws" --cwd ~/src/agt  # open a session in it, print its id
+agtctl session type --target 9f3c $'make test\n'      # inject text into a session by id prefix
+echo 'make test' | agtctl session type --target active --stdin
+agtctl session split toggle                   # split the active session
+agtctl quick toggle                           # toggle the quick terminal
+agtctl statusbar off                          # hide the status bar
+agtctl font inc                               # increase the active surface's font size
+```
+
+`session type` types the text as real keystrokes, and every newline is a real Return press — so a trailing newline submits the command, and a multi-line payload runs line by line (a multi-line shell construct like a `for` loop is entered across the shell's continuation prompts and runs as one command). Note the `$'…\n'` quoting: a literal `\n` inside plain single quotes reaches the CLI as two characters, not a newline; use `$'…\n'` or pipe a real newline via `--stdin`.
+
+`session copy` returns the target session's selected text in the response (it does not touch the system clipboard), so a script can move a selection from one session to another:
+
+```sh
+sel=$(agtctl session copy --target 9f3c)      # the selected text in session 9f3c
+agtctl session type --target work --select "$sel"  # paste it into another session
+```
+
+With no selection it exits non-zero with `no selection`. The selection must be made in the terminal (drag/Shift-click); `session copy` only reads it.
+
+A session's terminal surface is created lazily — it does not exist until the session has been shown at least once. Injecting text into a never-shown session therefore fails with `session not realized` unless you pass `--select`, which selects the session (realizing its surface) before injecting:
+
+```sh
+id=$(agtctl session new --cwd ~/src/agt)
+agtctl session type --target "$id" --select $'echo hello\n'
+```
+
 ## Restore limitations
 
 Restore reconstructs the structure, not the running processes. Three limitations follow from the design:

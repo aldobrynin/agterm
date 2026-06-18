@@ -205,9 +205,14 @@ struct ContentView: View {
         if quickTerminal.isVisible {
             GeometryReader { geo in
                 ZStack {
+                    // the transparent tap-catcher also carries the `quick-terminal` accessibility id:
+                    // a SwiftUI view is exposed in the accessibility tree (the Metal-backed
+                    // `QuickTerminalPane` is not), so this is the element control-API tests query for.
                     Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture { quickTerminal.hide() }
+                        .accessibilityElement()
+                        .accessibilityIdentifier("quick-terminal")
                     QuickTerminalPane()
                         .frame(width: geo.size.width * 0.9, height: geo.size.height * 0.9)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -216,7 +221,6 @@ struct ContentView: View {
                                 .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
                         )
                         .shadow(radius: 24)
-                        .accessibilityIdentifier("quick-terminal")
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
             }

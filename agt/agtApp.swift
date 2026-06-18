@@ -13,12 +13,15 @@ struct agtApp: App {
     @State private var palette = PaletteController()
     @State private var sessionSwitcher: SessionSwitcher
     @State private var settingsModel: SettingsModel
+    @State private var controlServer: ControlServer
 
     init() {
         let store = agtApp.restoredStore()
         _store = State(initialValue: store)
         _gitStatusService = State(initialValue: GitStatusService(store: store))
-        _actions = State(initialValue: AppActions(store: store))
+        let actions = AppActions(store: store)
+        _actions = State(initialValue: actions)
+        _controlServer = State(initialValue: ControlServer(store: store, actions: actions))
         _sessionSwitcher = State(initialValue: SessionSwitcher(store: store))
         // settings persist alongside the workspace snapshot (same AGT_STATE_DIR override).
         let settingsStore = ProcessInfo.processInfo.environment["AGT_STATE_DIR"]
@@ -40,6 +43,10 @@ struct agtApp: App {
                 .frame(minWidth: 640, minHeight: 400)
                 .task {
                     appDelegate.store = store
+                    // start the control channel (idempotent) and hand the delegate a
+                    // reference so it can stop + unlink the socket on terminate.
+                    appDelegate.controlServer = controlServer
+                    controlServer.start()
                     // the quick terminal spawns its shell in the active session's directory
                     // (home when nothing is selected).
                     QuickTerminalController.shared.cwdProvider = {
@@ -177,6 +184,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// persist it on terminate.
     var store: AppStore?
 
+    /// The control channel, handed over once the scene appears so the delegate can
+    /// stop the listener and unlink the socket on terminate.
+    var controlServer: ControlServer?
+
     func applicationWillFinishLaunching(_: Notification) {
         // a Debug app launched from DerivedData (ad-hoc signed) never hands the Dock a
         // non-default tile icon via the usual runtime path. set it explicitly. load the
@@ -196,6 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_: Notification) {
+        controlServer?.stop()
         store?.save()
     }
 

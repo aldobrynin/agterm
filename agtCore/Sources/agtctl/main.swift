@@ -1,0 +1,3 @@
+import agtctlKit
+
+Agtctl.main()

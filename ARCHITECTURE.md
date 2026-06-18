@@ -24,6 +24,16 @@ The app target adds the SwiftUI shell (`ContentView`, `TerminalView`), the AppKi
 
 Selection is a single `Session.ID?`. Workspace rows are non-selectable headers; only sessions are detail targets, so one id suffices and the owning workspace is derived.
 
+### Control API (split across both modules)
+
+The programmatic control channel (`agtctl` over a unix socket) follows the same core/app split as the git layer — pure protocol and decisions in `agtCore`, all I/O in the app target:
+
+- **`agtCore`** holds the wire protocol (`ControlProtocol.swift`: `Command`, `ControlArgs`, `ControlRequest`/`ControlResponse`, the tree node types) and the pure resolvers (`ControlResolve.swift`: the target resolver and the socket-path resolver). The `agtCore` *library* target stays dependency-free.
+- **`agtctlKit` + `agtctl`** are separate targets in the same SwiftPM package. `agtctlKit` is the testable library (the `swift-argument-parser` `ParsableCommand` tree plus the socket client); `agtctl` is the thin executable. Only these CLI targets link `ArgumentParser`, so they build and test with `swift build`/`swift test` and never touch Xcode or GhosttyKit.
+- **`ControlServer`** (`agt/Control/ControlServer.swift`) lives in the app target. It owns the POSIX unix socket, decodes each request, and dispatches it onto the existing `AppActions`/`AppStore` seam (and `GhosttySurfaceView.inject(text:)` for input). It is the only piece that touches the live surfaces, keeping the protocol and the CLI host-free.
+
+See `CLAUDE.md` for the socket lifecycle, addressing, command catalog, and the keep-in-sync convention.
+
 ### Sidebar (NSOutlineView)
 
 `WorkspaceSidebar` is an `NSViewRepresentable` wrapping an `NSOutlineView` (source-list style). It replaces an earlier SwiftUI `List`, which could not do reliable cross-section drag-and-drop. A `@MainActor` `Coordinator` is the data source and delegate, backed by `AppStore`:
