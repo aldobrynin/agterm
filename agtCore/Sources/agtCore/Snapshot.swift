@@ -47,15 +47,21 @@ public struct SessionSnapshot: Codable, Equatable, Sendable {
     public var id: UUID
     public var customName: String?
     public var cwd: String
-    /// Whether the session was shown as a vertical split. Optional for backward compat:
-    /// a session snapshot written before this field decodes as nil (→ not split). On
-    /// restore the split pane re-spawns a fresh shell, like the primary.
+    /// Whether the session was shown as a vertical split. Optional so a snapshot already
+    /// on disk before this field was added still decodes (as nil → not split) instead of
+    /// failing the load and wiping the saved tree. On restore the split pane re-spawns a
+    /// fresh shell, like the primary.
     public var isSplit: Bool?
+    /// The terminal font size in points, or nil to use the ghostty config default. Optional
+    /// so a snapshot already on disk before this field was added still decodes (as nil →
+    /// default) instead of failing the load and wiping the saved tree.
+    public var fontSize: Double?
 
-    public init(id: UUID, customName: String?, cwd: String, isSplit: Bool? = nil) {
+    public init(id: UUID, customName: String?, cwd: String, isSplit: Bool? = nil, fontSize: Double? = nil) {
         self.id = id
         self.customName = customName
         self.cwd = cwd
         self.isSplit = isSplit
+        self.fontSize = fontSize
     }
 }

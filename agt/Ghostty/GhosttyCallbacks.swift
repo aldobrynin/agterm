@@ -22,6 +22,13 @@ final class GhosttyCallbacks: @unchecked Sendable {
             let pwd = String(cString: ptr)
             DispatchQueue.main.async { view.applyPwd(pwd) }
             return true
+        case GHOSTTY_ACTION_CELL_SIZE:
+            // fires when the cell pixel size changes (font-size change via cmd +/-, or DPI
+            // change). used only as a trigger: the view reads the live font size and the app
+            // persists it.
+            guard let view = surfaceView(from: target) else { return true }
+            DispatchQueue.main.async { view.reportFontSize() }
+            return true
         default:
             return false
         }

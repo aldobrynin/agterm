@@ -171,6 +171,27 @@ struct AppStoreTests {
         #expect(split.teardownCount == 1)
     }
 
+    @Test func setFontSizeRecordsValue() {
+        let store = Self.makeStore()
+        let ws = store.addWorkspace(name: "work")
+        let session = store.addSession(toWorkspace: ws.id, cwd: "/a")!
+        #expect(session.fontSize == nil)
+        store.setFontSize(session.id, 16)
+        #expect(session.fontSize == 16)
+        store.setFontSize(session.id, 16) // unchanged: no-op, value unchanged
+        #expect(session.fontSize == 16)
+        store.setFontSize(session.id, 13)
+        #expect(session.fontSize == 13)
+    }
+
+    @Test func setFontSizeUnknownSessionIsIgnored() {
+        let store = Self.makeStore()
+        let ws = store.addWorkspace(name: "work")
+        let session = store.addSession(toWorkspace: ws.id, cwd: "/a")!
+        store.setFontSize(UUID(), 20)
+        #expect(session.fontSize == nil)
+    }
+
     @Test func closeUnknownSessionIsIgnored() {
         let store = Self.makeStore()
         let ws = store.addWorkspace(name: "work")

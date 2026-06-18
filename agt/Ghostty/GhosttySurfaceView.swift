@@ -17,6 +17,11 @@ final class GhosttySurfaceView: NSView, TerminalSurface {
 
     private let workingDirectory: String
 
+    /// The initial font size in points to create the surface with, or nil to use the
+    /// ghostty config default. A creation input (like `workingDirectory`): read in
+    /// `createSurface`, which may run after construction, so it's fixed at init.
+    private let initialFontSize: Float?
+
     /// The owning model session. `weak` to avoid a retain cycle: the `Session`
     /// strongly owns this surface via `Session.surface`. Set by the app's surface
     /// factory after construction.
@@ -37,6 +42,12 @@ final class GhosttySurfaceView: NSView, TerminalSurface {
     /// responder, so the app can track which split pane is active. Set by the factory.
     var onFocusChange: ((Bool) -> Void)?
 
+    /// Called on the main actor with the surface's current font size (points) when it
+    /// changes (cmd +/-), so the app can persist it. Set by the factory on the primary
+    /// surface only. libghostty has no font-size getter or change event, so this is driven
+    /// off the CELL_SIZE action and reads the size via `ghostty_surface_inherited_config`.
+    var onFontSizeChange: ((Double) -> Void)?
+
     /// Heap buffers backing the `const char*` fields of the surface config —
     /// notably `initial_input`, which libghostty writes to the pty
     /// asynchronously after the child spawns, so the buffer must outlive
@@ -55,8 +66,9 @@ final class GhosttySurfaceView: NSView, TerminalSurface {
     private var currentKeyEvent: NSEvent?
     private var currentTrackingArea: NSTrackingArea?
 
-    init(workingDirectory: String) {
+    init(workingDirectory: String, fontSize: Float? = nil) {
         self.workingDirectory = workingDirectory
+        self.initialFontSize = fontSize
         super.init(frame: .zero)
         wantsLayer = true
         setupTrackingArea()
@@ -100,6 +112,16 @@ final class GhosttySurfaceView: NSView, TerminalSurface {
         onExit?()
     }
 
+    func reportFontSize() {
+        // Already on the main actor (the CELL_SIZE callback hops via DispatchQueue.main.async).
+        // inherited_config carries the surface's live font size (post cmd +/-); a zero means
+        // libghostty hasn't resolved one yet, so skip it. The store no-ops a same-value write.
+        guard let surface else { return }
+        let size = Double(ghostty_surface_inherited_config(surface, GHOSTTY_SURFACE_CONTEXT_WINDOW).font_size)
+        guard size > 0 else { return }
+        onFontSizeChange?(size)
+    }
+
     // MARK: - Surface lifecycle
 
     func createSurface() {
@@ -128,6 +150,9 @@ final class GhosttySurfaceView: NSView, TerminalSurface {
             config.working_directory = UnsafePointer(p)
         }
         config.command = nil // login shell
+        // a persisted/restored size overrides the config default; nil leaves
+        // config_new's default (the ghostty config font-size) in place.
+        if let initialFontSize { config.font_size = initialFontSize }
 
         surface = ghostty_surface_new(app, &config)
         guard let surface else { return }

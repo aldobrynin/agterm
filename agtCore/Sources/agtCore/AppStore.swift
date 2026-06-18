@@ -129,6 +129,15 @@ public final class AppStore {
         save()
     }
 
+    /// Records a session's terminal font size (points) and persists it. No-ops when
+    /// unchanged so the cell-size event firing on a DPI change (not a font change)
+    /// doesn't write. Persisted like a structural mutation, not on every keystroke.
+    public func setFontSize(_ sessionID: UUID, _ size: Double) {
+        guard let session = session(withID: sessionID), session.fontSize != size else { return }
+        session.fontSize = size
+        save()
+    }
+
     /// Sets whether the bottom status bar is hidden and persists. No-ops when the
     /// value is unchanged so a redundant menu toggle doesn't write.
     public func setStatusBarHidden(_ hidden: Bool) {
@@ -145,7 +154,8 @@ public final class AppStore {
     public func snapshot() -> Snapshot {
         let workspaceSnapshots = workspaces.map { workspace in
             WorkspaceSnapshot(id: workspace.id, name: workspace.name, sessions: workspace.sessions.map { session in
-                SessionSnapshot(id: session.id, customName: session.customName, cwd: session.currentCwd ?? session.initialCwd, isSplit: session.isSplit)
+                SessionSnapshot(id: session.id, customName: session.customName, cwd: session.currentCwd ?? session.initialCwd,
+                                isSplit: session.isSplit, fontSize: session.fontSize)
             })
         }
         return Snapshot(selectedSessionID: selectedSessionID, workspaces: workspaceSnapshots, statusBarHidden: statusBarHidden)
@@ -165,6 +175,7 @@ public final class AppStore {
             let sessions = workspaceSnapshot.sessions.map { sessionSnapshot -> Session in
                 let session = Session(id: sessionSnapshot.id, initialCwd: sessionSnapshot.cwd, customName: sessionSnapshot.customName)
                 session.isSplit = sessionSnapshot.isSplit ?? false
+                session.fontSize = sessionSnapshot.fontSize
                 return session
             }
             return Workspace(id: workspaceSnapshot.id, name: workspaceSnapshot.name, sessions: sessions)

@@ -75,12 +75,13 @@ struct agtApp: App {
     /// view calls back to close the owning session in the store.
     @MainActor
     private static func makeSurface(for session: Session, store: AppStore, service: GitStatusService) -> GhosttySurfaceView {
-        let view = GhosttySurfaceView(workingDirectory: session.initialCwd)
+        let view = GhosttySurfaceView(workingDirectory: session.initialCwd, fontSize: session.fontSize.map(Float.init))
         view.session = session
         let sessionID = session.id
         view.onExit = { store.closeSession(sessionID) }
         view.onCwdChange = { service.requestRefresh(sessionID: sessionID) }
         view.onFocusChange = { focused in if focused { store.session(withID: sessionID)?.splitFocused = false } }
+        view.onFontSizeChange = { store.setFontSize(sessionID, $0) }
         return view
     }
 
@@ -90,7 +91,9 @@ struct agtApp: App {
     /// the split (hide + teardown), not the whole session.
     @MainActor
     private static func makeSplitSurface(for session: Session, store: AppStore) -> GhosttySurfaceView {
-        let view = GhosttySurfaceView(workingDirectory: session.effectiveCwd)
+        // seed the split from the session's font size so it matches the primary; its own
+        // cmd +/- changes aren't persisted (the split re-spawns fresh on restore).
+        let view = GhosttySurfaceView(workingDirectory: session.effectiveCwd, fontSize: session.fontSize.map(Float.init))
         let sessionID = session.id
         view.onExit = { store.closeSplit(sessionID) }
         view.onFocusChange = { focused in if focused { store.session(withID: sessionID)?.splitFocused = true } }

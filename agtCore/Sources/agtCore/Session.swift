@@ -43,6 +43,12 @@ public final class Session: Identifiable {
     /// rather than destroying it. Freed only on `closeSplit`/`closeSession`.
     @ObservationIgnored public var splitSurface: (any TerminalSurface)?
 
+    /// The terminal font size in points, or nil to use the ghostty config default. The app
+    /// sets the surface's initial size from this on creation and writes it back when the
+    /// user changes it (cmd +/-). `@ObservationIgnored`: nothing in SwiftUI reacts to it —
+    /// it is read imperatively at surface creation and captured by `snapshot()`.
+    @ObservationIgnored public var fontSize: Double?
+
     public init(id: UUID = UUID(), initialCwd: String, customName: String? = nil) {
         self.id = id
         self.initialCwd = initialCwd

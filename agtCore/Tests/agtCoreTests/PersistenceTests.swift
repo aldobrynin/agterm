@@ -167,6 +167,18 @@ final class PersistenceTests {
         #expect(restored.workspaces[0].sessions[0].isSplit == true)
     }
 
+    @Test func sessionFontSizePersistsAndRestores() {
+        let app = AppStore(persistence: store)
+        let work = app.addWorkspace(name: "work")
+        let session = try! #require(app.addSession(toWorkspace: work.id, cwd: "/a"))
+        app.setFontSize(session.id, 17.5)
+        #expect(store.load().workspaces[0].sessions[0].fontSize == 17.5)
+
+        let restored = AppStore(persistence: store)
+        restored.restore(from: store.load())
+        #expect(restored.workspaces[0].sessions[0].fontSize == 17.5)
+    }
+
     @Test func selectSessionPersistsSelectionToDisk() {
         let app = AppStore(persistence: store)
         let work = app.addWorkspace(name: "work")
