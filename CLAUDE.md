@@ -25,7 +25,7 @@ The app must build and `swift test` must stay green after every change.
 
 ## GhosttyKit.xcframework
 
-- Source: the `thdxg/ghostty` fork's release artifacts, pinned in `scripts/setup.sh` to tag `build-2026-06-14`. Bump the `TAG` variable deliberately when adopting a newer libghostty.
+- Source: the `thdxg/ghostty` fork's release artifacts, pinned in `scripts/setup.sh` to tag `build-2026-06-20`. Bump the `TAG` variable deliberately when adopting a newer libghostty.
 - `setup.sh` downloads `GhosttyKit.xcframework.tar.gz` and `ghostty-resources.tar.gz` via `gh release download`.
 - The xcframework, `agt/Resources/ghostty`, and `agt/Resources/terminfo` are gitignored and never committed. There is no Zig build and no submodule.
 - The xcframework is linked with `embed: false` in `project.yml`. Never embed it; embedding breaks the signature on non-Developer-ID builds.
