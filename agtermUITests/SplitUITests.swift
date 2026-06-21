@@ -70,6 +70,54 @@ final class SplitUITests: XCTestCase {
         XCTAssertEqual(collapsedTTY, rightTTY, "closing the split keeps the focused (right) pane, not the primary")
     }
 
+    // Ctrl-1 / Ctrl-2 focus the primary / split pane directly (a faster alias for ⌘⌥←/→). Verified
+    // with the same tty oracle: the command lands in whichever pane the shortcut focused.
+    func testCtrlNumberFocusesPaneDirectly() throws {
+        let row = app.staticTexts["session-row"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20), "seeded session should exist")
+        row.click()
+        usleep(800_000)
+
+        let primaryTTY = ttyAfterCommand(named: "primary")
+        XCTAssertNotNil(primaryTTY, "primary shell should write its tty")
+
+        // open the split — focus moves to the new (right) pane.
+        let splitButton = app.buttons["split-toggle"]
+        XCTAssertTrue(splitButton.waitForExistence(timeout: 5), "split toolbar button should exist")
+        splitButton.click()
+        usleep(800_000)
+        let rightTTY = ttyAfterCommand(named: "right")
+        XCTAssertNotNil(rightTTY, "right shell should write its tty")
+        XCTAssertNotEqual(rightTTY, primaryTTY, "opening the split moves focus to the new (right) pane")
+
+        // Ctrl-1 focuses the primary pane.
+        app.typeKey("1", modifierFlags: .control)
+        usleep(500_000)
+        XCTAssertEqual(ttyAfterCommand(named: "ctrl1"), primaryTTY, "Ctrl-1 focuses the primary pane")
+
+        // Ctrl-2 focuses the split (right) pane.
+        app.typeKey("2", modifierFlags: .control)
+        usleep(500_000)
+        XCTAssertEqual(ttyAfterCommand(named: "ctrl2"), rightTTY, "Ctrl-2 focuses the split pane")
+    }
+
+    // Ctrl-1 / Ctrl-2 are reserved app shortcuts: in a non-split session they must be consumed (no-op),
+    // never leaking a literal "1"/"2" into the shell. Verified by typing them, then running the tty
+    // oracle on the SAME line — a leaked "1"/"2" would prefix the command ("12tty …"), so the command
+    // fails and the marker file stays empty (ttyAfterCommand returns nil).
+    func testCtrlNumberDoesNotLeakIntoNonSplitTerminal() throws {
+        let row = app.staticTexts["session-row"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20), "seeded session should exist")
+        row.click()
+        usleep(800_000)
+
+        app.typeKey("1", modifierFlags: .control)
+        app.typeKey("2", modifierFlags: .control)
+        usleep(300_000)
+        XCTAssertNotNil(ttyAfterCommand(named: "nonsplit"),
+                        "Ctrl-1/Ctrl-2 must not leak characters into a non-split shell")
+    }
+
     // hiding the split (the toolbar toggle / ⌘D) keeps both shells alive, so re-showing must restore
     // the SAME panes — the re-parent that swaps the surface between the HSplitView and a standalone host
     // must never tear a surface down. Verified by tty identity across a full hide → show cycle: a

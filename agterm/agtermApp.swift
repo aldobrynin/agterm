@@ -13,6 +13,7 @@ struct agtermApp: App {
     @State private var actions: AppActions
     @State private var palette = PaletteController()
     @State private var sessionSwitcher: SessionSwitcher
+    @State private var paneShortcuts: PaneShortcuts
     @State private var settingsModel: SettingsModel
     @State private var controlServer: ControlServer
 
@@ -26,6 +27,7 @@ struct agtermApp: App {
         _actions = State(initialValue: actions)
         _controlServer = State(initialValue: ControlServer(library: library, actions: actions))
         _sessionSwitcher = State(initialValue: SessionSwitcher(library: library))
+        _paneShortcuts = State(initialValue: PaneShortcuts(library: library, actions: actions))
         // settings persist alongside the workspace snapshot (same AGTERM_STATE_DIR override).
         let settingsStore = ProcessInfo.processInfo.environment["AGTERM_STATE_DIR"]
             .map { SettingsStore(directory: URL(fileURLWithPath: $0, isDirectory: true)) } ?? SettingsStore()
@@ -71,6 +73,8 @@ struct agtermApp: App {
                     // controller and binds its own cwdProvider to that window's active session.
                     // install the Ctrl-Tab session-switcher key monitors (idempotent).
                     sessionSwitcher.start()
+                    // install the Ctrl-1/Ctrl-2 direct pane-focus key monitor (idempotent).
+                    paneShortcuts.start()
                     // register the notification delegate + request authorization (idempotent), and
                     // hand it the action hub + library so a banner click can navigate to the firing
                     // pane and the capture side can stamp the firing window id into the identity.
