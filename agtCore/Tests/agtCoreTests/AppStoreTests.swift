@@ -271,6 +271,64 @@ struct AppStoreTests {
         #expect(split.teardownCount == 1)
     }
 
+    @Test func closePrimaryPaneWithSplitKeepsSessionAndPromotesSurvivor() {
+        let store = Self.makeStore()
+        let ws = store.addWorkspace(name: "work")
+        let session = store.addSession(toWorkspace: ws.id, cwd: "/a")!
+        let primary = SpySurface(); session.surface = primary
+        let split = SpySurface(); session.splitSurface = split
+        session.isSplit = true
+        session.hasSplit = true
+        session.splitCwd = "/var/log"
+        store.closePrimaryPane(session.id)
+        #expect(store.session(withID: session.id) != nil) // session survives
+        #expect(primary.teardownCount == 1)               // the dead primary is torn down
+        #expect(split.teardownCount == 0)                 // the survivor is kept
+        #expect(session.surface == nil)
+        #expect(session.splitSurface != nil)
+        #expect(session.isSplit == false)
+        #expect(session.hasSplit == false)
+        #expect(session.splitFocused == true)             // the maximized survivor is shown
+        #expect(session.currentCwd == "/var/log")         // the survivor's cwd is promoted
+    }
+
+    @Test func closePrimaryPaneWithoutSplitClosesSession() {
+        let store = Self.makeStore()
+        let ws = store.addWorkspace(name: "work")
+        let session = store.addSession(toWorkspace: ws.id, cwd: "/a")!
+        let primary = SpySurface(); session.surface = primary
+        store.closePrimaryPane(session.id)
+        #expect(store.session(withID: session.id) == nil) // single session → closed
+        #expect(primary.teardownCount == 1)
+    }
+
+    @Test func closeSplitPaneWithPrimaryCollapsesToPrimary() {
+        let store = Self.makeStore()
+        let ws = store.addWorkspace(name: "work")
+        let session = store.addSession(toWorkspace: ws.id, cwd: "/a")!
+        let primary = SpySurface(); session.surface = primary
+        let split = SpySurface(); session.splitSurface = split
+        session.isSplit = true
+        session.hasSplit = true
+        store.closeSplitPane(session.id)
+        #expect(store.session(withID: session.id) != nil) // session survives
+        #expect(split.teardownCount == 1)                 // the split is torn down
+        #expect(primary.teardownCount == 0)               // the primary is kept
+        #expect(session.splitSurface == nil)
+        #expect(session.isSplit == false)
+    }
+
+    @Test func closeSplitPaneWithoutPrimaryClosesSession() {
+        let store = Self.makeStore()
+        let ws = store.addWorkspace(name: "work")
+        let session = store.addSession(toWorkspace: ws.id, cwd: "/a")!
+        // the primary already exited (surface nil); only the split survives, so this is the last pane.
+        let split = SpySurface(); session.splitSurface = split
+        store.closeSplitPane(session.id)
+        #expect(store.session(withID: session.id) == nil) // last pane → closed
+        #expect(split.teardownCount == 1)
+    }
+
     @Test func splitCwdRoundTripsThroughSnapshot() {
         let store = Self.makeStore()
         let ws = store.addWorkspace(name: "work")

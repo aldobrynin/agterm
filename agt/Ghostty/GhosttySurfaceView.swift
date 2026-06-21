@@ -374,6 +374,37 @@ final class GhosttySurfaceView: NSView, TerminalSurface {
         }
     }
 
+    private var reparentFocusInFlight = false
+
+    /// Grabs first responder with a bounded run-loop retry, for a pane that just became the maximized
+    /// survivor after its sibling pane closed. The collapse re-hosts this view (HSplitView → standalone)
+    /// and a single `makeFirstResponder` loses the re-parent race, so retry until it's in a window with a
+    /// surface and holds first responder. Distinct from the overlay's auto-focus: not gated on `autoFocus`
+    /// and no `didAutoFocus` latch, so it can run again on a later collapse.
+    func focusAfterReparent() {
+        guard !isDestroyed, !reparentFocusInFlight else { return }
+        reparentFocusInFlight = true
+        retryReparentFocus(attempt: 0, heldFor: 0)
+    }
+
+    private func retryReparentFocus(attempt: Int, heldFor: Int) {
+        guard !isDestroyed else { reparentFocusInFlight = false; return }
+        var holds = false
+        if let window, surface != nil {
+            if window.firstResponder !== self { window.makeFirstResponder(self) }
+            holds = window.firstResponder === self
+            if holds { notifySurfaceFocused() }
+        }
+        // the collapse re-hosts this view a tick or two AFTER focus is first requested, and that resigns
+        // the grab. So don't stop on the first success — keep re-grabbing until focus has STUCK for a few
+        // consecutive ticks (past the re-host), or the attempt budget runs out.
+        let nextHeld = holds ? heldFor + 1 : 0
+        guard nextHeld < 3, attempt < Self.autoFocusMaxAttempts else { reparentFocusInFlight = false; return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.autoFocusRetryInterval) { [weak self] in
+            self?.retryReparentFocus(attempt: attempt + 1, heldFor: nextHeld)
+        }
+    }
+
     func destroySurface() {
         isDestroyed = true
         if let surface { ghostty_surface_free(surface) }

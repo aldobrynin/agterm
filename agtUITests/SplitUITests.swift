@@ -106,6 +106,84 @@ final class SplitUITests: XCTestCase {
         XCTAssertEqual(rightTTYAfter, rightTTY, "hiding then showing the split keeps the same right shell alive")
     }
 
+    // exiting one pane of a split must keep the session alive (collapsed to the survivor) AND focus
+    // the surviving pane, so typing reaches it without a click. Verified by exiting the primary, then
+    // typing WITHOUT focusing and checking the command landed in the surviving right shell.
+    func testExitPrimaryPaneKeepsSessionAndFocusesSurvivor() throws {
+        let row = app.staticTexts["session-row"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20), "seeded session should exist")
+        row.click()
+        usleep(800_000)
+
+        let splitButton = app.buttons["split-toggle"]
+        XCTAssertTrue(splitButton.waitForExistence(timeout: 5), "split toolbar button should exist")
+
+        // open the split, focus the right pane, record its tty (the survivor when the primary exits).
+        splitButton.click()
+        usleep(800_000)
+        app.typeKey(.rightArrow, modifierFlags: [.command, .option])
+        usleep(500_000)
+        let rightTTY = ttyAfterCommand(named: "right")
+        XCTAssertNotNil(rightTTY, "right shell should write its tty")
+
+        // focus the primary (left) pane and exit its shell.
+        app.typeKey(.leftArrow, modifierFlags: [.command, .option])
+        usleep(500_000)
+        app.typeText("exit")
+        app.typeKey(.return, modifierFlags: [])
+        usleep(1_500_000) // shell exit + collapse + auto-focus retry
+
+        // the session survives (collapsed to the surviving right pane).
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "exiting the primary pane must keep the session")
+
+        // type WITHOUT focusing — the survivor must already hold focus, so the command reaches its shell.
+        let survivorTTY = ttyAfterCommand(named: "survivor")
+        XCTAssertEqual(survivorTTY, rightTTY, "after exiting the primary, the surviving right pane is focused")
+    }
+
+    // mirror of the above for exiting the split (right) pane: the session survives, collapsed to the
+    // primary, and the primary holds focus.
+    func testExitSplitPaneKeepsSessionAndFocusesSurvivor() throws {
+        let row = app.staticTexts["session-row"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20), "seeded session should exist")
+        row.click()
+        usleep(800_000)
+
+        let splitButton = app.buttons["split-toggle"]
+        XCTAssertTrue(splitButton.waitForExistence(timeout: 5), "split toolbar button should exist")
+
+        // record the primary tty (the survivor when the split exits).
+        let primaryTTY = ttyAfterCommand(named: "primary")
+        XCTAssertNotNil(primaryTTY, "primary shell should write its tty")
+
+        // open the split, focus the right pane, exit its shell.
+        splitButton.click()
+        usleep(800_000)
+        app.typeKey(.rightArrow, modifierFlags: [.command, .option])
+        usleep(500_000)
+        app.typeText("exit")
+        app.typeKey(.return, modifierFlags: [])
+        usleep(1_500_000)
+
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "exiting the split pane must keep the session")
+
+        let survivorTTY = ttyAfterCommand(named: "survivor")
+        XCTAssertEqual(survivorTTY, primaryTTY, "after exiting the split, the surviving primary pane is focused")
+    }
+
+    // exiting a non-split session closes it: the only session disappears from the sidebar.
+    func testExitNonSplitSessionClosesIt() throws {
+        let row = app.staticTexts["session-row"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20), "seeded session should exist")
+        row.click()
+        usleep(800_000)
+
+        app.typeText("exit")
+        app.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(app.staticTexts["session-row"].waitForNonExistence(timeout: 8),
+                      "exiting a non-split session closes it")
+    }
+
     /// Types `tty > <markerDir>/<name>` into the focused terminal and returns the tty the
     /// shell wrote (trimmed), or nil if nothing was written within the timeout.
     private func ttyAfterCommand(named name: String) -> String? {

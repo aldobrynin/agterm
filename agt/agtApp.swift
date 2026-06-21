@@ -209,7 +209,11 @@ struct agtApp: App {
         let view = GhosttySurfaceView(workingDirectory: session.initialCwd, fontSize: session.fontSize.map(Float.init), env: env)
         view.session = session
         let sessionID = session.id
-        view.onExit = { store.closeSession(sessionID) }
+        view.onExit = {
+            store.closePrimaryPane(sessionID)
+            // focus the surviving (now maximized) pane; the collapse re-hosts it, so use the retry.
+            (store.session(withID: sessionID)?.activeSurface as? GhosttySurfaceView)?.focusAfterReparent()
+        }
         view.onFocusChange = { focused in
             guard focused else { return }
             store.session(withID: sessionID)?.splitFocused = false
@@ -236,7 +240,11 @@ struct agtApp: App {
         view.session = session
         view.isSplitPane = true
         let sessionID = session.id
-        view.onExit = { store.closeSplit(sessionID) }
+        view.onExit = {
+            store.closeSplitPane(sessionID)
+            // focus the surviving (now maximized) pane; the collapse re-hosts it, so use the retry.
+            (store.session(withID: sessionID)?.activeSurface as? GhosttySurfaceView)?.focusAfterReparent()
+        }
         view.onFocusChange = { focused in
             guard focused else { return }
             store.session(withID: sessionID)?.splitFocused = true

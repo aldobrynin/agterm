@@ -300,45 +300,58 @@ private struct WindowContentView: View {
         }
     }
 
-    /// The active session's terminal, or a placeholder when nothing is selected. When the
-    /// session is split, the primary and split surfaces sit side by side in an `HSplitView`
-    /// (a draggable vertical divider). Hiding the split removes the second `TerminalView`;
-    /// its surface survives (owned by the session), so the shell isn't destroyed.
+    /// The terminal area: a DECK of EVERY session's terminal, all mounted so each is realized (its
+    /// shell spawned) at startup, with only the selected one visible + hit-testable. Switching is a
+    /// visibility flip, not a re-host, so the surface NSView is never detached/re-attached (re-hosting
+    /// invalidates the Metal drawable and flickers). A placeholder shows behind when nothing is selected.
     @ViewBuilder private var detailPane: some View {
-        if let active = store.activeSession {
-            ZStack {
-                if active.isSplit {
-                    HSplitView {
-                        TerminalView(session: active, surfaceKeyPath: \.surface, makeSurface: makeSurface)
-                            .overlay { paneDim(active.splitFocused) }
-                            .id(active.id)
-                        TerminalView(session: active, surfaceKeyPath: \.splitSurface, makeSurface: makeSplitSurface)
-                            .overlay { paneDim(!active.splitFocused) }
-                            .id("\(active.id.uuidString)-split")
-                    }
-                    // per-session identity: without it SwiftUI reuses one NSSplitView across session
-                    // switches and the divider (and arranged subviews) leak between sessions.
-                    .id("\(active.id.uuidString)-hsplit")
-                } else if active.splitFocused, active.splitSurface != nil {
-                    // split hidden while the right pane had focus: show that pane maximized. Both
-                    // shells stay alive (the primary is just off-screen), so reopening the split
-                    // restores the two panes in place — nothing is destroyed or reordered.
-                    TerminalView(session: active, surfaceKeyPath: \.splitSurface, makeSurface: makeSplitSurface)
-                        .id("\(active.id.uuidString)-split")
-                } else {
-                    TerminalView(session: active, surfaceKeyPath: \.surface, makeSurface: makeSurface)
-                        .id(active.id)
-                }
-                // an ephemeral overlay terminal on top, at full single-pane size, hiding the
-                // single/split content underneath while its one program runs.
-                if active.overlayActive {
-                    TerminalView(session: active, surfaceKeyPath: \.overlaySurface, makeSurface: makeOverlaySurface)
-                        .id("\(active.id.uuidString)-overlay")
-                }
+        let sessions = store.workspaces.flatMap(\.sessions)
+        ZStack {
+            if store.activeSession == nil {
+                Text("No session selected")
+                    .foregroundStyle(.secondary)
             }
-        } else {
-            Text("No session selected")
-                .foregroundStyle(.secondary)
+            ForEach(sessions, id: \.id) { session in
+                let isActive = session.id == store.selectedSessionID
+                sessionDetail(session, isActive: isActive)
+                    .opacity(isActive ? 1 : 0)
+                    .allowsHitTesting(isActive)
+            }
+        }
+    }
+
+    /// One session's terminal content: the primary pane, a side-by-side split (`HSplitView`), or the
+    /// maximized hidden-split pane, plus any overlay. `isActive` gates which pane auto-grabs focus —
+    /// only the visible deck entry, and within a split only the focused pane.
+    @ViewBuilder private func sessionDetail(_ session: Session, isActive: Bool) -> some View {
+        ZStack {
+            if session.isSplit {
+                HSplitView {
+                    TerminalView(session: session, surfaceKeyPath: \.surface, makeSurface: makeSurface,
+                                 isActive: isActive && !session.splitFocused)
+                        .overlay { paneDim(session.splitFocused) }
+                        .id(session.id)
+                    TerminalView(session: session, surfaceKeyPath: \.splitSurface, makeSurface: makeSplitSurface,
+                                 isActive: isActive && session.splitFocused)
+                        .overlay { paneDim(!session.splitFocused) }
+                        .id("\(session.id.uuidString)-split")
+                }
+                // per-session identity: without it SwiftUI reuses one NSSplitView across session
+                // switches and the divider (and arranged subviews) leak between sessions.
+                .id("\(session.id.uuidString)-hsplit")
+            } else if session.splitFocused, session.splitSurface != nil {
+                // split hidden while the right pane had focus: show that pane maximized.
+                TerminalView(session: session, surfaceKeyPath: \.splitSurface, makeSurface: makeSplitSurface, isActive: isActive)
+                    .id("\(session.id.uuidString)-split")
+            } else {
+                TerminalView(session: session, surfaceKeyPath: \.surface, makeSurface: makeSurface, isActive: isActive)
+                    .id(session.id)
+            }
+            // an ephemeral overlay terminal on top, hiding the single/split content while its program runs.
+            if session.overlayActive {
+                TerminalView(session: session, surfaceKeyPath: \.overlaySurface, makeSurface: makeOverlaySurface, isActive: isActive)
+                    .id("\(session.id.uuidString)-overlay")
+            }
         }
     }
 

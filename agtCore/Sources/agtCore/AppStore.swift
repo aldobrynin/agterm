@@ -185,6 +185,38 @@ public final class AppStore {
         save()
     }
 
+    /// The primary pane's shell exited. If a split pane is alive it becomes the session's single
+    /// (non-split) pane and the session survives; otherwise the session is closed. The survivor stays
+    /// in the `splitSurface` slot, shown maximized via `splitFocused`, and its cwd is promoted to the
+    /// session's so a restart restores the single session in the right directory. Called by the primary
+    /// surface's `onExit`.
+    public func closePrimaryPane(_ sessionID: UUID) {
+        guard let session = session(withID: sessionID) else { return }
+        guard session.splitSurface != nil else {
+            closeSession(sessionID)
+            return
+        }
+        session.surface?.teardown()
+        session.surface = nil
+        session.isSplit = false
+        session.hasSplit = false
+        session.splitFocused = true
+        if let cwd = session.splitCwd { session.currentCwd = cwd }
+        save()
+    }
+
+    /// The split pane's shell exited. If the primary is alive the split collapses to it (`closeSplit`);
+    /// otherwise the primary already exited, so this was the last pane and the session is closed. Called
+    /// by the split surface's `onExit`.
+    public func closeSplitPane(_ sessionID: UUID) {
+        guard let session = session(withID: sessionID) else { return }
+        guard session.surface != nil else {
+            closeSession(sessionID)
+            return
+        }
+        closeSplit(sessionID)
+    }
+
     /// Opens an ephemeral overlay terminal on a session running `command` (e.g. a TUI). The overlay
     /// surface is created lazily by the detail pane and runs the command as its process; when the
     /// program exits, `closeOverlay` tears it down. No-op (returns false) when the session is unknown

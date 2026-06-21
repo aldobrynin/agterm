@@ -10,9 +10,10 @@ import SwiftUI
 /// `dismantleNSView` is a no-op so the surface (and its shell) survives view
 /// churn when switching sessions. Only an explicit `teardown()` frees it.
 ///
-/// Each `TerminalView(session).id(session.id)` gets its own representable
-/// identity, so switching sessions dismantles the old view and makes a new one,
-/// but the session-owned surfaces stay alive.
+/// The detail pane keeps every session's `TerminalView` mounted (a deck) and toggles visibility +
+/// `isActive` on selection rather than swapping by `.id`, so switching sessions does NOT dismantle/
+/// re-host the surface NSView (a re-host invalidates the Metal drawable and flickers). Surfaces stay
+/// alive regardless.
 struct TerminalView: NSViewRepresentable {
     let session: Session
     /// Which surface slot this view binds to: the primary `\.surface` or the split
@@ -21,6 +22,9 @@ struct TerminalView: NSViewRepresentable {
     /// Lazily creates a `GhosttySurfaceView` for the session and stores it in the slot.
     /// Supplied by the app target (a primary or split factory).
     let makeSurface: (Session) -> GhosttySurfaceView
+    /// Whether this is the active (visible) pane in the deck. Every session's surface stays mounted, so
+    /// a view only auto-grabs focus when active — otherwise every mounted pane would fight for it.
+    var isActive = true
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -34,10 +38,18 @@ struct TerminalView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: GhosttySurfaceView, context: Context) {
-        // Deferred surface creation: makeNSView may have run before the view had
-        // a sized window. createSurface is idempotent (guards surface == nil and
-        // backing size), so calling it here is safe.
+        // makeNSView may have run before the view had a sized window; createSurface is idempotent
+        // (guards surface == nil and a non-zero backing size), so calling it here is safe. Synchronous
+        // on purpose: a deferred next-tick create races the layout and gives the surface a stale size.
         nsView.createSurface()
+        guard isActive else {
+            // hidden deck pane: drop the focus latch so it re-grabs when it next becomes active, and
+            // never keep first responder while hidden — the active pane needs it, and a background pane
+            // that still looks "focused" wrongly suppresses its own OSC 9 desktop notification.
+            context.coordinator.didFocus = false
+            if let window = nsView.window, window.firstResponder === nsView { window.makeFirstResponder(nil) }
+            return
+        }
         focusIfNeeded(nsView, coordinator: context.coordinator)
     }
 

@@ -53,7 +53,7 @@ See `CLAUDE.md` for the socket lifecycle, addressing, command catalog, and the k
 The surface lifecycle is the rule that keeps the C interop safe.
 
 - `Session` owns its `GhosttySurfaceView` through `Session.surface`, marked `@ObservationIgnored` so assigning the lazily-created view never churns observation. `customName`, `currentCwd`, and `gitStatus` are observed, so the sidebar and title bar refresh when a rename, a PWD report, or a git-status update lands.
-- The detail pane swaps surfaces via `.id(session.id)`. `TerminalView(session).id(session.id)` gives each session its own representable identity. Switching sessions dismantles the old `TerminalView` and makes a new one, but because the surface is owned by the `Session` (not the representable), the old shell survives and the new session's `makeNSView` returns its cached view.
+- The detail pane is an *eager deck*: every session's `TerminalView` stays mounted in a `ZStack` (so every shell spawns at startup), and switching flips visibility (`opacity` + `isActive`) instead of swapping by `.id`. The surface NSView is never dismantled/re-hosted on a switch, since re-hosting invalidates the Metal drawable and flickers the window. Surfaces stay owned by the `Session`, and only the active pane holds first responder.
 - `dismantleNSView` is a no-op. The surface is freed in exactly one place: `destroySurface()`, reached through `TerminalSurface.teardown()` when `AppStore.closeSession` removes the session. This single-owner, single-free rule is what makes passing the view as unretained `userdata` to libghostty safe.
 
 ## Git status

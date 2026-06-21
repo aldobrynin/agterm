@@ -177,24 +177,25 @@ final class ControlAPIUITests: XCTestCase {
                         "the typed command should run in the realized session's shell")
     }
 
-    // session.type without select into a never-shown session returns the "not realized" error.
-    func testSessionTypeWithoutSelectErrorsOnNeverShownSession() throws {
-        // pre-seed two sessions with the FIRST selected and relaunch, so the second session is restored but
-        // never shown — its surface stays nil (the lazy-creation gotcha), the deterministic never-realized case.
+    // eager session realization means a restored-but-not-selected session is already live, so session.type
+    // without --select reaches it (there are no never-shown sessions left to error on).
+    func testSessionTypeReachesEagerlyRealizedSession() throws {
+        // pre-seed two sessions with the FIRST selected and relaunch; the second is restored but never
+        // selected, yet the deck realizes every session at startup, so its shell is already running.
         let selectedID = UUID()
-        let neverShownID = UUID()
+        let otherID = UUID()
         let snapshot = """
         {"version":1,"selectedSessionID":"\(selectedID.uuidString)","workspaces":[\
         {"id":"\(UUID().uuidString)","name":"workspace 1","sessions":[\
         {"id":"\(selectedID.uuidString)","customName":null,"cwd":"\(NSHomeDirectory())"},\
-        {"id":"\(neverShownID.uuidString)","customName":null,"cwd":"\(NSHomeDirectory())"}]}]}
+        {"id":"\(otherID.uuidString)","customName":null,"cwd":"\(NSHomeDirectory())"}]}]}
         """
         try relaunch(withSnapshot: snapshot)
 
-        let response = try sendCommand(typeRequest(text: "echo hi\n", target: neverShownID.uuidString, select: false))
-        XCTAssertEqual(response["ok"] as? Bool, false, "typing into a never-shown session without select should fail")
-        XCTAssertEqual(response["error"] as? String, "session not realized; use select",
-                       "should report the use-select error: \(response)")
+        // type WITHOUT --select into the non-selected session; the command must land in its shell.
+        let file = markerDir.appendingPathComponent("eager")
+        XCTAssertNotNil(try typeUntilMarker("tty > '\(file.path)'\n", target: otherID.uuidString, file: file, select: false),
+                        "session.type without select reaches the eagerly-realized, non-selected session")
     }
 
     // session.copy on a session with no selection returns the "no selection" error (a fresh session has
