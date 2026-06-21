@@ -192,12 +192,11 @@ struct WorkspaceSidebar: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
-        // touching the observed store properties here registers this representable
-        // as an observer, so SwiftUI re-invokes updateNSView when the tree, selection,
-        // or any session's unseen count changes. folding unseenCount into the read is what
-        // makes a badge-only change re-invoke updateNSView; a touch inside viewFor
-        // would not register the dependency.
-        _ = store.workspaces.map { ($0.id, $0.name, $0.sessions.map { ($0.id, $0.unseenCount) }) }
+        // touching the observed store properties here registers this representable as an observer, so
+        // SwiftUI re-invokes updateNSView when the tree shape, selection, any session's name/displayName,
+        // split state, or unseen count changes. folding all of those into the read is what lets reconcile
+        // do a targeted per-row reload for a content change; a touch inside viewFor wouldn't register it.
+        _ = store.workspaces.map { ($0.id, $0.name, $0.unseenCount, $0.sessions.map { ($0.id, $0.displayName, $0.hasSplit, $0.unseenCount) }) }
         _ = store.selectedSessionID
         context.coordinator.reconcile()
         context.coordinator.syncSelection()
@@ -228,13 +227,15 @@ struct WorkspaceSidebar: NSViewRepresentable {
         /// Guards `syncSelection` against the selection-change delegate callback it
         /// itself triggers (which would otherwise re-enter the store).
         private var applyingSelection = false
-        /// Last-seen tree signature (workspace ids/names + per-session ids and display
-        /// names), used to tell a structural change from a badge-only update.
-        private var lastTreeSignature: [TreeSignature] = []
+        /// Last-seen tree SHAPE (ordered workspace ids, each with its ordered session ids). A change
+        /// here is structural (add/remove/move/reorder) and needs a full rebuild; a row's name/icon/
+        /// badge changing is NOT structural — it reloads just that row, so a cwd-driven name change
+        /// can't force a full `reloadData` + re-expand that re-lays-out (and jitters) every row.
+        private var lastShape: [TreeShape] = []
 
-        /// Last-seen unseen-notification count per session and workspace id, so a reconcile reloads
-        /// only the rows whose badge changed. An absent key reads as nil ≠ any real count.
-        private var lastSeenUnseen: [UUID: Int] = [:]
+        /// Last-seen visible content (label, split icon, badge) per session and workspace id, so a
+        /// reconcile reloads only the rows whose content changed. An absent key ≠ any real content.
+        private var lastRowContent: [UUID: RowContent] = [:]
 
         init(store: AppStore, actions: AppActions) {
             self.store = store
@@ -280,69 +281,70 @@ struct WorkspaceSidebar: NSViewRepresentable {
 
         // MARK: - Model rebuild
 
-        /// A workspace's structural signature: its id, name, and ordered sessions
-        /// (id + display name). Equal signatures across an update mean the tree shape
-        /// and every visible name are unchanged, so a badge-only delta can be
-        /// reloaded per-row instead of via a full rebuild. Including the display name
-        /// means a rename or a cwd-driven basename change forces a full rebuild that
-        /// refreshes the label, rather than being mistaken for a badge-only update.
-        private struct TreeSignature: Equatable {
-            let id: UUID
-            let name: String
-            let sessions: [SessionSignature]
+        /// The tree SHAPE: a workspace's id and its ordered session ids. Equal shapes across an update
+        /// mean no add/remove/move/reorder, so a row's content change (name/icon/badge) is handled by a
+        /// targeted per-row reload instead of a full rebuild. Row TEXT is deliberately NOT here: a
+        /// cwd-driven `displayName` change must not trigger a full `reloadData` + re-expand (which
+        /// re-lays-out every source-list row and jitters their labels horizontally).
+        private struct TreeShape: Equatable {
+            let workspaceID: UUID
+            let sessionIDs: [UUID]
         }
 
-        /// A session's contribution to a `TreeSignature`: its id, current display name, and whether it
-        /// has a split pane, so a name change OR a split open/close is detected (and the row reloaded
-        /// to swap the icon) even when the tree shape is unchanged. Uses `hasSplit` (not `isSplit`) so
-        /// the indicator persists while a split is hidden.
-        private struct SessionSignature: Equatable {
-            let id: UUID
-            let displayName: String
+        /// A row's visible content: its label (workspace name or session `displayName`), whether the
+        /// session has a split (the split-rectangle icon), and the unseen-badge count. A delta reloads
+        /// just that one row. Uses `hasSplit` (not `isSplit`) so the icon persists while a split is hidden.
+        private struct RowContent: Equatable {
+            let label: String
             let hasSplit: Bool
+            let unseen: Int
         }
 
-        /// Decides between a full rebuild (structural change: add/move/close/rename) and
-        /// a targeted per-row reload (badge-only change). A badge update during an
-        /// in-progress rename is skipped so a tick can't drop the edit.
+        /// Decides between a full rebuild (a SHAPE change: add/move/close/reorder) and a targeted
+        /// per-row reload (a content change: rename, cwd-driven name, split open/close, badge). Content
+        /// changes never rebuild — that full `reloadData` + re-expand re-lays-out every row and jitters
+        /// their labels. A reload during an in-progress rename is skipped so a tick can't drop the edit.
         func reconcile() {
-            let signature = store.workspaces.map { workspace in
-                TreeSignature(id: workspace.id, name: workspace.name,
-                              sessions: workspace.sessions.map { SessionSignature(id: $0.id, displayName: $0.displayName, hasSplit: $0.hasSplit) })
-            }
-            if signature != lastTreeSignature {
-                lastTreeSignature = signature
+            let shape = store.workspaces.map { TreeShape(workspaceID: $0.id, sessionIDs: $0.sessions.map(\.id)) }
+            if shape != lastShape {
+                lastShape = shape
                 rebuildAndReload()
-                snapshotBadges()
+                snapshotRowContent()
                 return
             }
-            reloadChangedBadgeRows()
+            reloadChangedContentRows()
         }
 
-        /// Reloads only the rows whose unseen-notification count changed — both the session row and
-        /// its workspace row (the roll-up). Skipped mid-rename so it can't drop an in-progress edit.
-        private func reloadChangedBadgeRows() {
+        /// Reloads only the rows whose visible content (label, split icon, or badge) changed — the
+        /// session row and, for a badge roll-up, its workspace row. A per-row `reloadItem` re-renders
+        /// just that row at its stable frame, so a name/cwd update never re-lays-out the whole tree.
+        /// Skipped mid-rename so it can't drop an in-progress edit.
+        private func reloadChangedContentRows() {
             guard let outline = outlineView, !committing, !editing else { return }
-            func reloadIfChanged(_ id: UUID, _ count: Int) {
-                guard count != lastSeenUnseen[id] else { return }
-                lastSeenUnseen[id] = count
+            func reloadIfChanged(_ id: UUID, _ content: RowContent) {
+                guard content != lastRowContent[id] else { return }
+                lastRowContent[id] = content
                 if let node = nodeCache[id] { outline.reloadItem(node) }
             }
             for workspace in store.workspaces {
-                reloadIfChanged(workspace.id, workspace.unseenCount)
-                for session in workspace.sessions { reloadIfChanged(session.id, session.unseenCount) }
+                reloadIfChanged(workspace.id, RowContent(label: workspace.name, hasSplit: false, unseen: workspace.unseenCount))
+                for session in workspace.sessions {
+                    reloadIfChanged(session.id, RowContent(label: session.displayName, hasSplit: session.hasSplit, unseen: session.unseenCount))
+                }
             }
         }
 
-        /// Records the current unseen count of every session and workspace (keyed by their distinct
-        /// ids) so the next reconcile can detect a badge-only delta.
-        private func snapshotBadges() {
-            var snapshot: [UUID: Int] = [:]
+        /// Records the current visible content (label, split icon, badge) of every row (keyed by their
+        /// distinct ids) so the next reconcile can detect a per-row content delta.
+        private func snapshotRowContent() {
+            var snapshot: [UUID: RowContent] = [:]
             for workspace in store.workspaces {
-                snapshot[workspace.id] = workspace.unseenCount
-                for session in workspace.sessions { snapshot[session.id] = session.unseenCount }
+                snapshot[workspace.id] = RowContent(label: workspace.name, hasSplit: false, unseen: workspace.unseenCount)
+                for session in workspace.sessions {
+                    snapshot[session.id] = RowContent(label: session.displayName, hasSplit: session.hasSplit, unseen: session.unseenCount)
+                }
             }
-            lastSeenUnseen = snapshot
+            lastRowContent = snapshot
         }
 
         /// Rebuilds `roots` from the store, reusing cached node instances by id so
@@ -609,6 +611,13 @@ struct WorkspaceSidebar: NSViewRepresentable {
             field.isEditable = true
             field.isBordered = true
             field.drawsBackground = true
+            // the editable field draws its own background, and the label color was set to the row's
+            // (often dark) selection-foreground — leaving those makes the edit text unreadable (dark-on-
+            // dark) on every theme. paint the field with the terminal theme's foreground-on-background so
+            // it reads everywhere; setColors restores the row's color when it reloads after the commit.
+            let theme = GhosttyApp.shared
+            field.textColor = theme.terminalForegroundColor ?? .labelColor
+            field.backgroundColor = theme.terminalBackgroundColor ?? .textBackgroundColor
             field.setAccessibilityIdentifier("edit-field")
             field.window?.makeFirstResponder(field)
             editing = true
@@ -645,6 +654,13 @@ struct WorkspaceSidebar: NSViewRepresentable {
             field.isBordered = false
             field.drawsBackground = false
             field.setAccessibilityIdentifier(kind == .workspace ? "workspace-row" : "session-row")
+            // beginEditing painted the field with the theme fg-on-bg for the edit box; restore the row's
+            // selection-aware themed color so a commit that didn't change the name (no reload) doesn't
+            // leave the edit color stuck on the row.
+            if let outline = outlineView, let cell = field.superview as? SidebarCellView {
+                let row = outline.row(for: field)
+                cell.setColors(selected: row >= 0 && outline.selectedRowIndexes.contains(row))
+            }
         }
 
         // MARK: - Context menu
@@ -831,6 +847,13 @@ struct WorkspaceSidebar: NSViewRepresentable {
 /// An `NSOutlineView` subclass that serves a per-row context menu and starts
 /// inline rename on double-click, both routed to the coordinator.
 final class SidebarOutlineView: NSOutlineView {
+    // never become first responder: focus lives in the terminal. A mouse click still selects the row
+    // (selection is independent of first responder), but without this the click steals first responder,
+    // and the responder bounce (terminal → outline → terminal, via mouseDown's focusActiveTerminal) makes
+    // AppKit re-set `isEmphasized` on the rows — an extra repaint that flicks the selection pill on every
+    // click. Programmatic selection (palette/Ctrl-Tab) never bounces, so it's already smooth.
+    override var acceptsFirstResponder: Bool { false }
+
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
         let row = self.row(at: point)
