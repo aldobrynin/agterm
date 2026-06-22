@@ -65,6 +65,9 @@ public struct ControlArgs: Codable, Sendable, Equatable {
     /// Whether `session.overlay.open` keeps the overlay open after its command exits (showing the
     /// "press any key to close" prompt) instead of closing immediately.
     public var wait: Bool?
+    /// For `session.overlay.open`, the percent of the pane (1...100) a *floating* overlay panel
+    /// occupies in both dimensions; omitted gives the default full-pane overlay.
+    public var sizePercent: Int?
     /// Target window for session/workspace/tree/font commands: id / prefix / `active` (=frontmost).
     /// Selects the window whose tree the command operates on.
     public var window: String?
@@ -80,9 +83,9 @@ public struct ControlArgs: Codable, Sendable, Equatable {
 
     public init(name: String? = nil, cwd: String? = nil, workspace: String? = nil, text: String? = nil,
                 select: Bool? = nil, mode: String? = nil, command: String? = nil, wait: Bool? = nil,
-                window: String? = nil, pane: String? = nil, to: String? = nil, title: String? = nil,
-                body: String? = nil, width: Int? = nil, height: Int? = nil, x: Int? = nil, y: Int? = nil,
-                display: Int? = nil) {
+                sizePercent: Int? = nil, window: String? = nil, pane: String? = nil, to: String? = nil,
+                title: String? = nil, body: String? = nil, width: Int? = nil, height: Int? = nil,
+                x: Int? = nil, y: Int? = nil, display: Int? = nil) {
         self.name = name
         self.cwd = cwd
         self.workspace = workspace
@@ -91,6 +94,7 @@ public struct ControlArgs: Codable, Sendable, Equatable {
         self.mode = mode
         self.command = command
         self.wait = wait
+        self.sizePercent = sizePercent
         self.window = window
         self.pane = pane
         self.to = to

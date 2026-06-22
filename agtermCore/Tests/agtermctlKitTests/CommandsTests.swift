@@ -155,6 +155,12 @@ struct CommandsTests {
         #expect(try request(["session", "overlay", "open", "revdiff", "--wait"]) == expected)
     }
 
+    @Test func sessionOverlayOpenFloating() throws {
+        let expected = ControlRequest(cmd: .sessionOverlayOpen, target: "active",
+                                      args: ControlArgs(command: "htop", sizePercent: 70))
+        #expect(try request(["session", "overlay", "open", "htop", "--size-percent", "70"]) == expected)
+    }
+
     @Test func sessionOverlayClose() throws {
         #expect(try request(["session", "overlay", "close"]) == ControlRequest(cmd: .sessionOverlayClose, target: "active"))
     }
@@ -163,6 +169,13 @@ struct CommandsTests {
         // --block changes run() (open → poll result), not makeRequest, so the built request is the plain open.
         let expected = ControlRequest(cmd: .sessionOverlayOpen, target: "active", args: ControlArgs(command: "revdiff"))
         #expect(try request(["session", "overlay", "open", "revdiff", "--block"]) == expected)
+    }
+
+    @Test func sessionOverlayOpenWithBlockAndSizePercentParses() throws {
+        // --block composes with --size-percent; the block run() opens via makeRequest, so sizePercent rides through.
+        let expected = ControlRequest(cmd: .sessionOverlayOpen, target: "active",
+                                      args: ControlArgs(command: "htop", sizePercent: 60))
+        #expect(try request(["session", "overlay", "open", "htop", "--block", "--size-percent", "60"]) == expected)
     }
 
     @Test func sessionOverlayResult() throws {

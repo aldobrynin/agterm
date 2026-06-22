@@ -103,6 +103,13 @@ public final class Session: Identifiable {
     /// In-memory only (absent from `snapshot()`), so it never persists.
     @ObservationIgnored public var overlayExitCode: Int?
 
+    /// For a *floating* overlay, the percent of the pane (both width and height) the panel occupies,
+    /// 1...100; nil for the default full-pane overlay. A floating overlay renders as an opaque, framed
+    /// panel centered in the pane with the session still VISIBLE behind it (the full overlay instead
+    /// hides the session and draws translucent). Observed, so the detail pane picks the right layout.
+    /// Set at open, cleared on close; never persisted.
+    public var overlaySizePercent: Int?
+
     public init(id: UUID = UUID(), initialCwd: String, customName: String? = nil) {
         self.id = id
         self.initialCwd = initialCwd

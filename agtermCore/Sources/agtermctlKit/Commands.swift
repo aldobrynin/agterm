@@ -313,6 +313,7 @@ struct Session: ParsableCommand {
             @Option(name: .long, help: "Working directory (default: the session's current directory).") var cwd: String?
             @Flag(name: .long, help: "Keep the overlay open after COMMAND exits (press any key to close).") var wait = false
             @Flag(name: .long, help: "Block until COMMAND exits and exit with its status (the program renders normally; capture its output via the program's own output file).") var block = false
+            @Option(name: .long, help: "Render a floating, framed panel at PERCENT (1-100) of the pane instead of full-size.") var sizePercent: Int?
             @OptionGroup var target: TargetOptions
             @OptionGroup var options: ClientOptions
 
@@ -324,15 +325,17 @@ struct Session: ParsableCommand {
 
             func makeRequest() throws -> ControlRequest {
                 ControlRequest(cmd: .sessionOverlayOpen, target: target.target,
-                               args: options.withWindow(ControlArgs(cwd: cwd, command: command, wait: wait ? true : nil)))
+                               args: options.withWindow(ControlArgs(cwd: cwd, command: command, wait: wait ? true : nil,
+                                                                     sizePercent: sizePercent)))
             }
 
             func run() throws {
                 guard block else { try defaultRun(); return }
                 let client = SocketClient(path: options.socketPath())
-                // open non-wait so the overlay closes on exit and the exit status becomes readable.
-                let opened = try client.send(ControlRequest(cmd: .sessionOverlayOpen, target: target.target,
-                                                            args: options.withWindow(ControlArgs(cwd: cwd, command: command))))
+                // open via the same `makeRequest()` the non-block path uses (DRY): in block mode `validate()`
+                // guarantees `!wait`, so its `wait` is nil — identical to opening non-wait, and the floating
+                // `--size-percent` is carried through the single source instead of a duplicated ControlArgs.
+                let opened = try client.send(makeRequest())
                 guard opened.ok, let id = opened.result?.id else {
                     SocketClient.printResponse(opened, json: options.json)
                     throw ExitCode.failure

@@ -297,6 +297,10 @@ private struct WindowContentView: View {
                 .frame(height: 1)
             detailPane
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // the floating overlay panel, anchored on the detail (terminal) area so its GeometryReader
+                // reports that area exactly — correct centering, no manual sidebar/titlebar insets. It sits
+                // OUTSIDE each session's HSplitView-hosting ZStack, so opening it never perturbs the split.
+                .overlay { floatingOverlayLayer }
         }
     }
 
@@ -324,10 +328,14 @@ private struct WindowContentView: View {
     /// maximized hidden-split pane, plus any overlay. `isActive` gates which pane auto-grabs focus —
     /// only the visible deck entry, and within a split only the focused pane.
     @ViewBuilder private func sessionDetail(_ session: Session, isActive: Bool) -> some View {
+        // a FULL overlay (no size) hides the session beneath it (opacity 0) and draws translucent; a
+        // FLOATING overlay (overlaySizePercent set) leaves the session VISIBLE and draws a smaller
+        // opaque framed panel on top. Either way the pane(s) stay non-interactive while an overlay is up.
+        let fullOverlay = session.overlayActive && session.overlaySizePercent == nil
         ZStack {
-            // the session's pane(s). hidden (opacity 0) but kept MOUNTED — shells stay alive, like the deck
-            // does for inactive sessions — while an overlay is up, so the translucent overlay reveals the
-            // window backing (desktop, tint + blur), not the session content behind it.
+            // the session's pane(s), kept MOUNTED while an overlay is up — shells stay alive, like the deck
+            // does for inactive sessions. a FULL overlay hides them (opacity 0) so its translucency reveals the
+            // window backing, not the session; a FLOATING overlay leaves them visible behind its opaque panel.
             Group {
                 if session.isSplit {
                     HSplitView {
@@ -354,13 +362,21 @@ private struct WindowContentView: View {
                         .id(session.id)
                 }
             }
-            .opacity(session.overlayActive ? 0 : 1)
-            .allowsHitTesting(!session.overlayActive)
-            // an ephemeral overlay terminal on top, running its program. with the pane(s) hidden behind it,
-            // it draws translucent + blurred exactly like a regular pane (no opaque backing) — its
-            // transparency reveals the window backing, not the session. zIndex keeps it above the pane(s).
-            if session.overlayActive {
-                TerminalView(session: session, surfaceKeyPath: \.overlaySurface, makeSurface: makeOverlaySurface, isActive: isActive)
+            .opacity(fullOverlay ? 0 : 1)
+            // gate hit-testing on `fullOverlay`, NOT `session.overlayActive`: this modifier must NOT change
+            // when a floating overlay opens, or the AppKit NSSplitView re-lays-out and overruns up into the
+            // titlebar (same class of perturbation as adding a sibling). a floating overlay therefore leaves
+            // the panes hit-testable here; `floatingOverlayLayer`'s transparent catcher absorbs clicks around
+            // the panel so they can't reach the panes and steal the overlay's focus.
+            .allowsHitTesting(!fullOverlay)
+            // the FULL overlay renders here, in-deck, above the (hidden) pane(s). The FLOATING overlay is
+            // deliberately NOT a ZStack sibling: adding a conditional child to this HSplitView-hosting
+            // subtree makes the AppKit NSSplitView overrun up into the titlebar (Codex-confirmed). It renders
+            // as an `.overlay` on `detailPane` instead (`floatingOverlayLayer`), so this subtree's shape is
+            // identical whether a floating overlay is open or not — the split's frame never moves.
+            if fullOverlay {
+                TerminalView(session: session, surfaceKeyPath: \.overlaySurface,
+                             makeSurface: makeOverlaySurface, isActive: isActive)
                     .id("\(session.id.uuidString)-overlay")
                     .zIndex(1)
             }
@@ -371,6 +387,44 @@ private struct WindowContentView: View {
         // the visible session reclaims focus.
         .onChange(of: session.overlayActive) { _, isOpen in
             if !isOpen, isActive { (session.activeSurface as? GhosttySurfaceView)?.focusAfterReparent() }
+        }
+    }
+
+    /// The FLOATING overlay, attached as an `.overlay` on `detailPane` (NOT inside any session's
+    /// `sessionDetail`/HSplitView ZStack, so opening it never perturbs the split layout). Anchoring it on
+    /// `detailPane` means the `GeometryReader` reports the terminal area EXACTLY — no manual sidebar/titlebar
+    /// insets (computing those at the window level mis-positioned the panel one line low). The panel is an
+    /// opaque, framed terminal sized to `overlaySizePercent`% of the detail area and centered in it, with the
+    /// active session's pane(s) visible around it. Only the active session's overlay shows — overlays are
+    /// active-session UI — so `ControlServer` selects the target when opening a floating overlay, ensuring its
+    /// surface mounts and its program runs (otherwise a `--block` open on a non-active target would hang).
+    @ViewBuilder private var floatingOverlayLayer: some View {
+        if let session = store.activeSession, session.overlayActive, let percent = session.overlaySizePercent {
+            GeometryReader { geo in
+                let fraction = CGFloat(percent) / 100
+                ZStack {
+                    // a transparent click-catcher over the whole detail area: it absorbs clicks AROUND the
+                    // panel so they can't reach the still-hit-testable panes behind and steal the overlay's
+                    // first responder. it lives here (the detailPane `.overlay`), NOT in `sessionDetail`, so
+                    // unlike toggling the panes' own `allowsHitTesting` it never perturbs the NSSplitView.
+                    Color.clear.contentShape(Rectangle())
+                    TerminalView(session: session, surfaceKeyPath: \.overlaySurface,
+                                 makeSurface: makeOverlaySurface, isActive: true)
+                        .frame(width: geo.size.width * fraction, height: geo.size.height * fraction)
+                        // solid backing + hairline frame + shadow so the floating panel reads as a distinct
+                        // opaque window over the still-visible session (libghostty draws only the terminal).
+                        .background(terminalColor)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                        )
+                        .shadow(radius: 24)
+                        .id("\(session.id.uuidString)-overlay")
+                }
+                // center the panel (and span the catcher) within the detail area (the GeometryReader is it).
+                .frame(width: geo.size.width, height: geo.size.height)
+            }
         }
     }
 

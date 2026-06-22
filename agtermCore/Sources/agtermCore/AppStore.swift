@@ -243,13 +243,18 @@ public final class AppStore {
     /// surface is created lazily by the detail pane and runs the command as its process; when the
     /// program exits, `closeOverlay` tears it down. No-op (returns false) when the session is unknown
     /// or already has an overlay open. NOT persisted — the overlay never survives a relaunch.
+    ///
+    /// `sizePercent` (clamped to 1...100) requests a *floating* overlay: an opaque, framed panel sized
+    /// to that percent of the pane, with the session still visible behind it. nil gives the default
+    /// full-pane overlay that hides the session.
     @discardableResult public func openOverlay(_ sessionID: UUID, command: String, cwd: String? = nil,
-                                               wait: Bool = false) -> Bool {
+                                               wait: Bool = false, sizePercent: Int? = nil) -> Bool {
         guard let session = session(withID: sessionID), !session.overlayActive else { return false }
         session.overlayCommand = command
         session.overlayCwd = cwd
         session.overlayWait = wait
         session.overlayExitCode = nil
+        session.overlaySizePercent = sizePercent.map { min(100, max(1, $0)) }
         session.overlayActive = true
         return true
     }
@@ -272,6 +277,7 @@ public final class AppStore {
         session.overlayCommand = nil
         session.overlayCwd = nil
         session.overlayWait = false
+        session.overlaySizePercent = nil
         return true
     }
 

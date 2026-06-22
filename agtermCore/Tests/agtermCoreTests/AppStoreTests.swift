@@ -360,6 +360,8 @@ struct AppStoreTests {
         #expect(session.overlayActive == true)
         #expect(session.overlayCommand == "revdiff")
         #expect(session.overlayCwd == "/b")
+        // no size given → the default full-pane overlay, not a floating one.
+        #expect(session.overlaySizePercent == nil)
         // a second open while one is active is a no-op.
         #expect(store.openOverlay(session.id, command: "other") == false)
         #expect(session.overlayCommand == "revdiff")
@@ -387,6 +389,32 @@ struct AppStoreTests {
         // a bogus id must be a no-op, not a crash, and must not touch any existing session.
         store.recordOverlayExit(UUID(), code: 5)
         #expect(session.overlayExitCode == nil)
+    }
+
+    @Test func openOverlayFloatingClampsSizePercent() {
+        let store = Self.makeStore()
+        let ws = store.addWorkspace(name: "work")
+        let session = store.addSession(toWorkspace: ws.id, cwd: "/a")!
+        #expect(store.openOverlay(session.id, command: "htop", sizePercent: 70) == true)
+        #expect(session.overlaySizePercent == 70)
+        // close clears the floating size back to nil.
+        store.closeOverlay(session.id)
+        #expect(session.overlaySizePercent == nil)
+        // out-of-range values clamp to 1...100, including negatives; the exact bounds pass through.
+        store.openOverlay(session.id, command: "htop", sizePercent: 250)
+        #expect(session.overlaySizePercent == 100)
+        store.closeOverlay(session.id)
+        store.openOverlay(session.id, command: "htop", sizePercent: 0)
+        #expect(session.overlaySizePercent == 1)
+        store.closeOverlay(session.id)
+        store.openOverlay(session.id, command: "htop", sizePercent: -5)
+        #expect(session.overlaySizePercent == 1)
+        store.closeOverlay(session.id)
+        store.openOverlay(session.id, command: "htop", sizePercent: 100)
+        #expect(session.overlaySizePercent == 100)
+        store.closeOverlay(session.id)
+        store.openOverlay(session.id, command: "htop", sizePercent: 1)
+        #expect(session.overlaySizePercent == 1)
     }
 
     @Test func closeOverlayTearsDownAndClears() {

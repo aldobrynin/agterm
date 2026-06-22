@@ -419,8 +419,16 @@ final class ControlServer {
             }
             return resolveSession(request.target, window: request.args?.window) { store, id in
                 guard store.openOverlay(id, command: command, cwd: request.args?.cwd,
-                                        wait: request.args?.wait ?? false) else {
+                                        wait: request.args?.wait ?? false,
+                                        sizePercent: request.args?.sizePercent) else {
                     return ControlResponse(ok: false, error: "overlay already open")
+                }
+                // a FLOATING overlay (sizePercent set) renders only for the ACTIVE session, so on a non-active
+                // target its surface never mounts and its program never runs — and `--block` would poll
+                // forever. select the target so it mounts and runs (the full overlay mounts in the eager deck
+                // regardless, so this only matters for floating).
+                if request.args?.sizePercent != nil {
+                    store.selectSession(id)
                 }
                 return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
             }

@@ -101,14 +101,17 @@ With no selection it exits non-zero with `no selection`. The selection must be m
 ```sh
 agtermctl session overlay open "revdiff HEAD~3" --target 9f3c  # review the last 3 commits over session 9f3c
 agtermctl session overlay open "htop"                          # on the active session
+agtermctl session overlay open "htop" --size-percent 70        # a floating, framed panel at 70% of the pane
 agtermctl session overlay open "make test" --wait              # keep the overlay open after exit (press a key to close)
 agtermctl session overlay open "make test" --block             # block until it exits; exit with its status
 agtermctl session overlay close --target 9f3c                  # close it from a script
 ```
 
-The overlay renders only for the active session, so select it first (or target `active`). By default it closes the instant the program exits; `--wait` keeps it on a "press any key to close" prompt so you can read the program's final output. A `*` `(overlay)` tag in `agtermctl tree` marks a session whose overlay is open.
+The overlay renders only for the active session, so select it first (or target `active`) — a floating `--size-percent` overlay auto-selects its target (see below), so this caveat is really about the full overlay. By default it closes the instant the program exits; `--wait` keeps it on a "press any key to close" prompt so you can read the program's final output. A `*` `(overlay)` tag in `agtermctl tree` marks a session whose overlay is open.
 
 `--block` runs the program in the overlay (rendering normally) and blocks until it exits, then exits with the program's status — useful in a script that needs the outcome of an interactive run. The program's output stays its own concern: a TUI writes its result to its own file (for example `revdiff --output=…`) which the script reads, while `--block` reports only the exit status (the overlay never captures stdout). `--block` can't be combined with `--wait`; `session overlay result` reports the last overlay's exit status on demand for a manual open → poll flow.
+
+By default the overlay fills the pane, drawn translucent, hiding the session beneath it. Pass `--size-percent N` (1–100) for a *floating* variant instead: an opaque, framed panel sized to N% of the pane in both dimensions and centered in it, with the session still visible around it. Useful for a small auxiliary program (a picker, a monitor) that you want floating over — not replacing — the terminal you're working in. It composes with `--block` (a blocking floating overlay). Opening a floating overlay selects its target session (the floating panel only renders for the active session), so it always starts even when the target was not active.
 
 A session's terminal surface is created lazily — it does not exist until the session has been shown at least once. Injecting text into a never-shown session therefore fails with `session not realized` unless you pass `--select`, which selects the session (realizing its surface) before injecting:
 
