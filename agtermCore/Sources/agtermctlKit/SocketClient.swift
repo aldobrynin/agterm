@@ -98,19 +98,19 @@ struct SocketClient {
 
     /// Print a response: the raw JSON line with `json: true`, otherwise a human-readable summary. An error
     /// response (`ok == false`, non-`--json`) goes to stderr; everything else to stdout.
-    static func printResponse(_ response: ControlResponse, json: Bool) {
+    static func printResponse(_ response: ControlResponse, json: Bool, echoID: Bool = false) {
         if !json, !response.ok {
             FileHandle.standardError.write(Data((formatResponse(response, json: false) + "\n").utf8))
             return
         }
-        print(formatResponse(response, json: json))
+        print(formatResponse(response, json: json, echoID: echoID))
     }
 
     /// Render a response to a single string (no trailing newline): the raw JSON line with `json: true`,
     /// otherwise a human-readable summary — an `error:` line, the tree listing, the selected text, the
-    /// affected id, or a bare `ok`. Pure so it can be unit-tested directly; `printResponse` routes it to
-    /// stdout/stderr.
-    static func formatResponse(_ response: ControlResponse, json: Bool) -> String {
+    /// affected id (only when `echoID`, i.e. for the create commands), or a bare `ok`. Pure so it can be
+    /// unit-tested directly; `printResponse` routes it to stdout/stderr.
+    static func formatResponse(_ response: ControlResponse, json: Bool, echoID: Bool = false) -> String {
         if json {
             if let data = try? JSONEncoder().encode(response), let line = String(data: data, encoding: .utf8) {
                 return line
@@ -129,7 +129,7 @@ struct SocketClient {
         if let text = response.result?.text {
             return text
         }
-        if let id = response.result?.id {
+        if echoID, let id = response.result?.id {
             return id
         }
         return "ok"

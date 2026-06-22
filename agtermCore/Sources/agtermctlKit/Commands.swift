@@ -89,14 +89,19 @@ protocol RequestCommand: ParsableCommand {
     associatedtype Options: ParsableArguments & ConnectionOptions
     var options: Options { get }
     func makeRequest() throws -> ControlRequest
+    /// Whether the human-readable output should echo `result.id`. Default false — the id is just noise
+    /// when the caller already named the target; the create commands (`*.new`) override it to true,
+    /// since the new id isn't known until the command runs. The id is always present under `--json`.
+    var echoesResultID: Bool { get }
 }
 
 extension RequestCommand {
+    var echoesResultID: Bool { false }
     public func run() throws {
         let request = try makeRequest()
         let client = SocketClient(path: options.socketPath())
         let response = try client.send(request)
-        SocketClient.printResponse(response, json: options.json)
+        SocketClient.printResponse(response, json: options.json, echoID: echoesResultID)
         if !response.ok { throw ExitCode.failure }
     }
 }
@@ -124,6 +129,7 @@ struct Workspace: ParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Create a workspace.")
         @Argument(help: "Workspace name (defaults to the auto-generated name).") var name: String?
         @OptionGroup var options: ClientOptions
+        var echoesResultID: Bool { true }
 
         func makeRequest() throws -> ControlRequest {
             ControlRequest(cmd: .workspaceNew, args: options.withWindow(ControlArgs(name: name)))
@@ -175,6 +181,7 @@ struct Session: ParsableCommand {
         @Option(name: .long, help: "Working directory (defaults to $HOME).") var cwd: String?
         @Option(name: .long, help: "Target workspace id/prefix (defaults to the current one).") var workspace: String?
         @OptionGroup var options: ClientOptions
+        var echoesResultID: Bool { true }
 
         func makeRequest() throws -> ControlRequest {
             ControlRequest(cmd: .sessionNew, args: options.withWindow(ControlArgs(cwd: cwd, workspace: workspace)))
@@ -334,6 +341,7 @@ struct Window: ParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Create and open a window.")
         @Argument(help: "Window name (defaults to the auto-generated name).") var name: String?
         @OptionGroup var options: BasicOptions
+        var echoesResultID: Bool { true }
 
         func makeRequest() throws -> ControlRequest {
             ControlRequest(cmd: .windowNew, args: ControlArgs(name: name))

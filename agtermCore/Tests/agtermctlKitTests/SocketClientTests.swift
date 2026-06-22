@@ -44,16 +44,26 @@ struct SocketClientTests {
         #expect(throws: SocketClientError.self) { try client.send(ControlRequest(cmd: .tree)) }
     }
 
-    /// `RequestCommand.run()` returns without throwing on a `{"ok":true}` response and prints the
-    /// affected id to stdout.
-    @Test func runSucceedsOnOkResponse() throws {
+    /// A create command's `run()` returns without throwing on `{"ok":true}` and prints the new id.
+    @Test func runEchoesNewIdForCreateCommand() throws {
+        let server = StubServer(response: ControlResponse(ok: true, result: ControlResult(id: "9f3c")))
+        try server.start()
+        defer { server.stop() }
+
+        let command = try Session.New.parse(["--socket", server.path])
+        let printed = try captureStdout { try command.run() }
+        #expect(printed == "9f3c\n")
+    }
+
+    /// A non-create command suppresses the id echo (prints `ok`) even when the response carries an id.
+    @Test func runQuietsIdForNonCreateCommand() throws {
         let server = StubServer(response: ControlResponse(ok: true, result: ControlResult(id: "9f3c")))
         try server.start()
         defer { server.stop() }
 
         let command = try Tree.parse(["--socket", server.path])
         let printed = try captureStdout { try command.run() }
-        #expect(printed == "9f3c\n")
+        #expect(printed == "ok\n")
     }
 
     /// Runs `body` with the process stdout redirected to a pipe, returning everything it printed.
@@ -85,9 +95,14 @@ struct SocketClientTests {
         #expect(SocketClient.formatResponse(ControlResponse(ok: true), json: false) == "ok")
     }
 
-    @Test func formatResponseId() {
+    @Test func formatResponseEchoesIdWhenRequested() {
         let response = ControlResponse(ok: true, result: ControlResult(id: "9f3c"))
-        #expect(SocketClient.formatResponse(response, json: false) == "9f3c")
+        #expect(SocketClient.formatResponse(response, json: false, echoID: true) == "9f3c")
+    }
+
+    @Test func formatResponseSuppressesIdByDefault() {
+        let response = ControlResponse(ok: true, result: ControlResult(id: "9f3c"))
+        #expect(SocketClient.formatResponse(response, json: false) == "ok")
     }
 
     @Test func formatResponseText() {
