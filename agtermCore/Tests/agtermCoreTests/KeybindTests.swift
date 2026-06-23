@@ -177,4 +177,18 @@ struct KeybindTests {
         let chord = Chord(mods: [.command, .option], key: "n")
         #expect(parseKeybind(chord.displayString) == [chord])
     }
+
+    @Test func chordGlyphStringRendersMacOSGlyphs() {
+        #expect(Chord(mods: [.command], key: "n").glyphString == "⌘N")
+        // macOS order is ⌃⌥⇧⌘, so option/shift render BEFORE command.
+        #expect(Chord(mods: [.command, .option], key: "n").glyphString == "⌥⌘N")
+        #expect(Chord(mods: [.command, .shift], key: "n").glyphString == "⇧⌘N")
+        #expect(Chord(mods: [.control], key: "p").glyphString == "⌃P")
+        // fixed macOS ⌃⌥⇧⌘ modifier order regardless of insertion order.
+        #expect(Chord(mods: [.shift, .option, .command, .control], key: "x").glyphString == "⌃⌥⇧⌘X")
+        // symbols are left as-is; named keys render as their glyphs.
+        #expect(Chord(mods: [.command], key: "+").glyphString == "⌘+")
+        #expect(Chord(mods: [.control], key: "tab").glyphString == "⌃⇥")
+        #expect(Chord(mods: [.command], key: "return").glyphString == "⌘↩")
+    }
 }

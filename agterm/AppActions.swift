@@ -244,42 +244,26 @@ final class AppActions {
 
     // MARK: - Command palettes
 
-    /// The palette shortcut hint for a rebindable built-in: its currently-bound chord in kitty syntax
-    /// (so it tracks rebinds and stays consistent with how custom commands display their shortcut),
-    /// or `nil` when the action has no chord. The four arrow-bound actions fall back to their hardcoded
-    /// arrow glyph when no override is set — `defaultChord` is nil for them (arrows can't round-trip
-    /// through `parseKeybind`), mirroring `agtermApp.arrowShortcut(for:)`.
+    /// The palette shortcut hint for a rebindable built-in: its currently-bound chord rendered as macOS
+    /// menu glyphs (so it tracks rebinds and reads like the menu equivalent), or `nil` when the action
+    /// has no chord. The arrow-bound actions fall back to their hardcoded arrow glyph when no override is
+    /// set — `defaultChord` is nil for them (arrows can't round-trip through `parseKeybind`), mirroring
+    /// `agtermApp.arrowShortcut(for:)`.
     private func paletteHint(for action: BuiltinAction) -> String? {
         if let chord = settingsModel?.keymap.equivalent(for: action) {
-            // a chord whose key is a grammar separator (`+`/`>`) renders as an unparseable kitty
-            // string (e.g. increase_font_size's default `cmd++`), which reads as broken in the
-            // palette; show a readable glyph for those instead of `displayString`.
-            return glyphHint(for: chord) ?? chord.displayString
+            // macOS glyphs (⌘N, ⌃P) so a built-in reads like its menu item, NOT the raw kitty
+            // `displayString` (custom commands keep that).
+            return chord.glyphString
         }
         switch action {
-        case .focusLeftPane: return "⌘⌥←"
-        case .focusRightPane: return "⌘⌥→"
+        case .focusLeftPane: return "⌥⌘←"
+        case .focusRightPane: return "⌥⌘→"
         case .previousSession: return "⌥⌘↑"
         case .nextSession: return "⌥⌘↓"
         case .previousAttentionSession: return "⌃⌥↑"
         case .nextAttentionSession: return "⌃⌥↓"
         default: return nil
         }
-    }
-
-    /// A readable glyph for a chord whose key can't round-trip through `parseKeybind` (a grammar
-    /// separator like `+`/`>`, e.g. the font-size defaults). Returns `nil` for an expressible chord so
-    /// the caller falls back to the kitty `displayString`. Only the separator keys agterm actually
-    /// ships as defaults (`+`/`-`/`0` for font size) need a glyph; the modifier order matches macOS
-    /// (⌃⌥⇧⌘key).
-    private func glyphHint(for chord: Chord) -> String? {
-        guard parseKeybind(chord.displayString) != [chord] else { return nil }
-        var glyph = ""
-        if chord.mods.contains(.control) { glyph += "⌃" }
-        if chord.mods.contains(.option) { glyph += "⌥" }
-        if chord.mods.contains(.shift) { glyph += "⇧" }
-        if chord.mods.contains(.command) { glyph += "⌘" }
-        return glyph + chord.key
     }
 
     /// The app's commands as palette items, sharing the same logic as the menu/buttons. Includes a

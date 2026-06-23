@@ -59,6 +59,26 @@ public struct Chord: Equatable, Hashable, Sendable {
         parts.append(key)
         return parts.joined(separator: "+")
     }
+
+    /// The chord rendered as macOS menu glyphs (e.g. `⌘N`, `⌘⌥N`, `⌃P`): modifiers in the macOS order
+    /// `⌃⌥⇧⌘`, then the key (single letters uppercased, the named keys as their symbols). Used for the
+    /// action-palette shortcut hints so a built-in reads like its menu equivalent; custom commands keep
+    /// the raw kitty `displayString`.
+    public var glyphString: String {
+        var s = ""
+        if mods.contains(.control) { s += "⌃" }
+        if mods.contains(.option) { s += "⌥" }
+        if mods.contains(.shift) { s += "⇧" }
+        if mods.contains(.command) { s += "⌘" }
+        switch key {
+        case "tab": s += "⇥"
+        case "space": s += "␣"
+        case "return": s += "↩"
+        case "delete": s += "⌫"
+        default: s += key.count == 1 ? key.uppercased() : key
+        }
+        return s
+    }
 }
 
 /// A keybind: an ordered sequence of chords. Length 1 is a simple chord (e.g. `cmd+shift+e`),
