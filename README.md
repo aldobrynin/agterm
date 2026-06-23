@@ -59,7 +59,7 @@ xcodebuild test -project agterm.xcodeproj -scheme agterm -destination 'platform=
 - Default session name is the basename of the session's working directory. Renaming a session pins a custom name; clearing it reverts to the basename.
 - Add workspaces and sessions from a two-icon bar at the bottom of the sidebar: a workspace button, and a session menu offering **New Session** (a shell in the home directory) and **Open Directory…** (a folder picker that roots the session there). The two session actions are also on each workspace row's right-click menu, so a specific or empty workspace can be targeted.
 - Rename inline (double-click a row or use its `Rename` context-menu item). Close a session from its context menu, or it closes itself when the shell exits. Delete a whole workspace from its right-click menu (also in the menu bar and the action palette); a non-empty workspace asks to confirm first, and the last remaining workspace can't be deleted.
-- Move a session between workspaces by dragging it onto another workspace, or via the row's `Move to` menu. The session keeps running across the move, with its shell and scrollback intact.
+- Move a session between workspaces by dragging it onto another workspace, or via the row's `Move to` menu. The session keeps running across the move, with its shell and scrollback intact. Reorder a session within its workspace by dragging it up or down, and reorder workspaces by dragging them. Dropping between two rows places the dragged row at that exact position rather than just appending it.
 - A quick terminal: a single scratch terminal overlaid at 90% of the window (toolbar button next to the split toggle), opening in the active session's directory. Click the button again or the surrounding margin to dismiss; hiding keeps its shell alive. It is not persisted across launches.
 - A standard macOS menu bar mirrors the in-app actions with keyboard shortcuts: **File** — New Session (⌘N), New Workspace (⇧⌘N), Open Directory… (⌘O), Rename Session/Workspace, Delete Workspace, Close Session (⌘W, terminal-style: closes the active session); **View** — Split (⌘D), Quick Terminal (⌃`), the command palettes, Previous/Next Session (⌥⌘↑/⌥⌘↓), First/Last Session (menu and palette only, no hotkey), Increase/Decrease/Actual font size (⌘+/⌘−/⌘0).
 - Two fuzzy-search command palettes (type to filter, ↑/↓ to move, Enter to run, Esc to dismiss): the **session switcher** (⌃P) jumps between open sessions by name or working directory, and the **action palette** (⌃⇧P) runs any command (new/rename/close, delete workspace, split, quick terminal, font size, move session to a workspace, …). Results sort by match quality then alphabetically. Both are also in the View menu.
@@ -93,6 +93,9 @@ agtermctl session new --workspace "$ws" --cwd ~/src/agterm  # open a session in 
 agtermctl session type --target 9f3c $'make test\n'      # inject text into a session by id prefix
 echo 'make test' | agtermctl session type --target active --stdin
 agtermctl session go --to next                   # step to the next session (next|prev|first|last; stops at ends)
+agtermctl session move --to up                   # reorder the active session within its workspace (up|down|top|bottom)
+agtermctl session move "$ws"                      # relocate the active session to another workspace (appends)
+agtermctl workspace move --to top                # reorder a workspace among its siblings (up|down|top|bottom)
 agtermctl session split toggle                   # split the active session
 agtermctl quick toggle                           # toggle the quick terminal
 agtermctl font inc                               # increase the active surface's font size
