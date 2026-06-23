@@ -223,6 +223,13 @@ struct agtermApp: App {
                 Button("Clear Status") { actions.clearActiveSessionStatus() }
                     .keyboardShortcut(shortcut(for: .clearStatus))
                     .disabled(library.activeStore?.activeSession == nil)
+                Divider()
+                // open keymap.conf in $EDITOR in a 95% overlay over the active session; it reloads on the
+                // editor exiting. Keyless, like Reload Keymap.
+                Button { actions.editKeymap() } label: { Label("Edit Keymap…", systemImage: "pencil") }
+                // re-read keymap.conf and apply (menu shortcuts re-render, the runner + palette rebuild).
+                // Keyless — a future BuiltinAction could give it a default chord.
+                Button { actions.reloadKeymap() } label: { Label("Reload Keymap", systemImage: "keyboard") }
             }
             // View: font zoom (drives ghostty on the focused terminal), the status-bar toggle, and
             // split / quick terminal / palettes. The menu reserves an icon column because the system
@@ -280,10 +287,6 @@ struct agtermApp: App {
                     .keyboardShortcut(shortcut(for: .sessionPalette))
                 Button { palette.toggle(.actions) } label: { Label("Command Palette", systemImage: "command") }
                     .keyboardShortcut(shortcut(for: .commandPalette))
-                Divider()
-                // re-read keymap.conf and apply (menu shortcuts re-render, the runner + palette
-                // rebuild). Keyless — a future BuiltinAction could give it a default chord.
-                Button { actions.reloadKeymap() } label: { Label("Reload Keymap", systemImage: "keyboard") }
             }
             CommandGroup(replacing: .help) {
                 Button("Install Command Line Tool…") { CLIInstaller.run() }

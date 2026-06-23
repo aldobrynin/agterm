@@ -20,4 +20,12 @@ public enum ConfigPaths {
     public static func keymapPath(configDirectory: URL) -> URL {
         configDirectory.appendingPathComponent("keymap.conf")
     }
+
+    /// The shell command that opens `keymapPath` in the user's editor: `$VISUAL` else `$EDITOR` else
+    /// `vi`, with the path single-quoted for safe `/bin/sh` interpolation. Meant to run in the overlay's
+    /// login shell, so an `$EDITOR`/`$VISUAL` exported from the user's login-shell startup is honored
+    /// (one set only in `~/.zshrc` is not, since the overlay's inner shell is non-interactive).
+    public static func editorCommand(forKeymapPath keymapPath: String) -> String {
+        "${VISUAL:-${EDITOR:-vi}} '\(keymapPath.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
 }

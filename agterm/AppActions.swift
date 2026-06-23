@@ -98,6 +98,22 @@ final class AppActions {
     /// settings model.
     func reloadKeymap() { settingsModel?.reloadKeymap() }
 
+    /// The session whose currently-open overlay is the keymap editor, so `WindowContentView`'s overlay
+    /// onChange can reload the keymap when that overlay closes. Nil when no keymap-edit overlay is up.
+    var keymapEditOverlaySession: UUID?
+
+    /// Open `keymap.conf` in the user's editor (`$VISUAL`/`$EDITOR`, else `vi`) in a 95% floating overlay
+    /// over the active session. The overlay runs through the login shell, so an `$EDITOR` exported from
+    /// the user's login-shell startup is honored. On the editor exiting, the keymap is reloaded (the
+    /// overlay-close onChange in `WindowContentView`). No-op with no active session, before the settings
+    /// model is wired, or when an overlay is already open.
+    func editKeymap() {
+        guard let store, let id = store.selectedSessionID, let path = settingsModel?.keymapPath else { return }
+        if store.openOverlay(id, command: ConfigPaths.editorCommand(forKeymapPath: path), sizePercent: 95) {
+            keymapEditOverlaySession = id
+        }
+    }
+
     /// Step the selection to the previous/next session, or jump to the first/last, in the sidebar's
     /// flattened visual order (`navigateSession` owns the logic so the GUI, palette, and control
     /// channel can't drift). Each routes through `selectSession` (recency/badge/persist/workspace)
@@ -277,6 +293,7 @@ final class AppActions {
             PaletteItem(title: "Increase Font Size", shortcut: paletteHint(for: .increaseFontSize)) { [weak self] in self?.increaseFontSize() },
             PaletteItem(title: "Decrease Font Size", shortcut: paletteHint(for: .decreaseFontSize)) { [weak self] in self?.decreaseFontSize() },
             PaletteItem(title: "Actual Font Size", shortcut: paletteHint(for: .resetFontSize)) { [weak self] in self?.resetFontSize() },
+            PaletteItem(title: "Edit Keymap") { [weak self] in self?.editKeymap() },
             PaletteItem(title: "Reload Keymap") { [weak self] in self?.reloadKeymap() },
         ]
         if store?.canRemoveWorkspace == true {

@@ -387,6 +387,11 @@ private struct WindowContentView: View {
         // the visible session reclaims focus.
         .onChange(of: session.overlayActive) { _, isOpen in
             if !isOpen, isActive { (session.activeSurface as? GhosttySurfaceView)?.focusAfterReparent() }
+            // a keymap-edit overlay just closed → reapply the edited keymap.
+            if !isOpen, actions.keymapEditOverlaySession == session.id {
+                actions.keymapEditOverlaySession = nil
+                actions.reloadKeymap()
+            }
         }
     }
 

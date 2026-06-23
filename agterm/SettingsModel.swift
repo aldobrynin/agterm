@@ -93,6 +93,9 @@ final class SettingsModel {
         return ConfigPaths.keymapPath(configDirectory: configDir)
     }
 
+    /// The resolved `keymap.conf` path, exposed for the Edit Keymap action (the overlay command).
+    var keymapPath: String { keymapURL().path }
+
     /// Read `keymap.conf` and parse it into `keymap` + `keymapDiagnostics`. A MISSING file is not an
     /// error: it yields an empty keymap with no diagnostics (the starter file is created at init). A
     /// file that EXISTS but can't be read (permissions, invalid UTF-8) is surfaced as a single line-0

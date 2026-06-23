@@ -30,4 +30,18 @@ struct ConfigPathsTests {
         let dir = URL(fileURLWithPath: "/Users/test/.config/agterm")
         #expect(ConfigPaths.keymapPath(configDirectory: dir).path == "/Users/test/.config/agterm/keymap.conf")
     }
+
+    @Test func editorCommandFallsBackToViAndSingleQuotesPath() {
+        #expect(ConfigPaths.editorCommand(forKeymapPath: "/Users/test/.config/agterm/keymap.conf")
+                == "${VISUAL:-${EDITOR:-vi}} '/Users/test/.config/agterm/keymap.conf'")
+    }
+
+    @Test func editorCommandQuotesSpacesAndEmbeddedSingleQuotes() {
+        // a path with a space stays one argument; an embedded single quote is escaped as '\'' so the
+        // command can't break out of the quoting.
+        #expect(ConfigPaths.editorCommand(forKeymapPath: "/a b/keymap.conf")
+                == "${VISUAL:-${EDITOR:-vi}} '/a b/keymap.conf'")
+        #expect(ConfigPaths.editorCommand(forKeymapPath: "/o'd/keymap.conf")
+                == "${VISUAL:-${EDITOR:-vi}} '/o'\\''d/keymap.conf'")
+    }
 }
