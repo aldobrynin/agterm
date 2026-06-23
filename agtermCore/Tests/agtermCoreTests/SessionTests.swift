@@ -166,6 +166,14 @@ struct SessionTests {
         #expect(session.effectiveCwd == "/repo/primary")
     }
 
+    @Test func agentIndicatorDefaultsToIdle() {
+        // a fresh session shows no agent status (.idle, no blink) until the control channel sets one.
+        let session = Session(initialCwd: "/repo")
+        #expect(session.agentIndicator == AgentIndicator())
+        #expect(session.agentIndicator.status == .idle)
+        #expect(session.agentIndicator.blink == false)
+    }
+
     @Test func activeSurfacePicksFocusedPane() {
         let session = Session(initialCwd: "/repo")
         let primary = FakeSurface(), split = FakeSurface()

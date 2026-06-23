@@ -38,6 +38,10 @@ final class GhosttyApp {
     /// Whether the window chrome uses the compact title bar (single short row, smaller icons, no
     /// subtitle). NOT ghostty-resolved: `WindowAppearance.sync` reads it, `SettingsModel` writes it.
     private(set) var compactToolbar: Bool = false
+    /// Whether the sidebar draws the red unseen-notification count badge. NOT ghostty-resolved: the
+    /// sidebar Coordinator reads it (gating the count to 0 when off), `SettingsModel` writes it. The
+    /// re-render rides the `.agtermAppearanceChanged` notification, like `compactToolbar`.
+    private(set) var notificationBadgeEnabled: Bool = true
     let callbacks = GhosttyCallbacks()
     private var resourcesDir: String?
 
@@ -95,6 +99,12 @@ final class GhosttyApp {
     /// and on every change; the window re-sync rides the `.agtermAppearanceChanged` notification.
     func setCompactToolbar(_ enabled: Bool) {
         compactToolbar = enabled
+    }
+
+    /// Set whether the sidebar draws the notification count badge. Called by `SettingsModel` at launch
+    /// and on every change; the sidebar re-reconcile rides the `.agtermAppearanceChanged` notification.
+    func setNotificationBadgeEnabled(_ enabled: Bool) {
+        notificationBadgeEnabled = enabled
     }
 
     // MARK: - Config

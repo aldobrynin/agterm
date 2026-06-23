@@ -47,6 +47,7 @@ targets:
           - "agterm.entitlements"
           - "Resources/ghostty"
           - "Resources/terminfo"
+          - "Resources/agent-status"
       # Ghostty resources (themes + shell-integration), downloaded by setup.sh.
       # Folder reference (not the default "group") because the contents are
       # extensionless files Xcode would otherwise skip. Lands at
@@ -62,6 +63,14 @@ targets:
       # Contents/Resources/terminfo — a SIBLING of ghostty/ — so libghostty's
       # dirname(GHOSTTY_RESOURCES_DIR)/terminfo derivation hits it.
       - path: agterm/Resources/terminfo
+        type: folder
+        buildPhase: resources
+      # Agent-status hooks package (the wrapper + shell integration + codex
+      # notify chain). Folder reference (not the default "group") so the
+      # extensionless .sh files, the shell/ subdir, and the exec bit survive.
+      # Lands at Contents/Resources/agent-status — the installer copies it from
+      # there to ~/.config/agterm/agent-status.
+      - path: agterm/Resources/agent-status
         type: folder
         buildPhase: resources
     settings:

@@ -38,8 +38,10 @@ private struct NonRestorableWindow: NSViewRepresentable {
     }
 }
 
-/// General tab: the macOS notification-banner toggle (default on). The sidebar unseen-count badge
-/// is independent of this — it tracks notifications whether or not banners are shown.
+/// General tab: the macOS notification-banner toggle and the sidebar unseen-count badge toggle (both
+/// default on). The two are independent — the count keeps tracking notifications whether or not
+/// banners are shown, and hiding the count badge is render-only (it reappears with the current count
+/// when re-enabled) and never affects the agent-status glyph.
 private struct GeneralSettingsView: View {
     let model: SettingsModel
 
@@ -49,6 +51,12 @@ private struct GeneralSettingsView: View {
                 Toggle("Show notification banners", isOn: notificationsEnabled)
                     .accessibilityIdentifier("settings-notifications")
                 Text("Terminal desktop notifications (OSC 9 / 777) appear in macOS Notification Center. The sidebar badge tracks them either way.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+
+                Toggle("Show notification badges", isOn: notificationBadgeEnabled)
+                    .accessibilityIdentifier("settings-notification-badges")
+                Text("The red unseen-count pill on sidebar rows. The count keeps tracking either way, so it reappears with the current count when turned back on.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -62,6 +70,13 @@ private struct GeneralSettingsView: View {
     private var notificationsEnabled: Binding<Bool> {
         Binding(get: { model.settings.notificationsEnabled ?? true },
                 set: { model.setNotificationsEnabled($0 ? nil : false) })
+    }
+
+    /// 1:1 with the toggle; nil (the default) reads as on, so settings.json stays minimal until the
+    /// user hides the count badges.
+    private var notificationBadgeEnabled: Binding<Bool> {
+        Binding(get: { model.settings.notificationBadgeEnabled ?? true },
+                set: { model.setNotificationBadgeEnabled($0 ? nil : false) })
     }
 }
 

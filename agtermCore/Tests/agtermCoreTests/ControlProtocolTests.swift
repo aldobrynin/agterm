@@ -61,6 +61,43 @@ struct ControlProtocolTests {
         #expect(decoded.args?.select == nil)
     }
 
+    @Test func sessionStatusRoundTripsWithStateAndBlink() throws {
+        let request = ControlRequest(cmd: .sessionStatus, target: "9f3c",
+                                     args: ControlArgs(status: "active", blink: true, autoReset: true))
+        let decoded = try roundTrip(request)
+        #expect(decoded == request)
+        #expect(decoded.cmd == .sessionStatus)
+        #expect(decoded.args?.status == "active")
+        #expect(decoded.args?.blink == true)
+        #expect(decoded.args?.autoReset == true)
+    }
+
+    @Test func sessionStatusRawStringMapsToCommandAndArgs() throws {
+        let json = #"{"cmd":"session.status","args":{"status":"blocked"}}"#
+        let decoded = try JSONDecoder().decode(ControlRequest.self, from: Data(json.utf8))
+        #expect(decoded.cmd == .sessionStatus)
+        #expect(decoded.args?.status == "blocked")
+        #expect(decoded.args?.blink == nil)
+        #expect(decoded.args?.autoReset == nil)
+    }
+
+    @Test func sessionStatusDecodesAutoReset() throws {
+        let json = #"{"cmd":"session.status","args":{"status":"completed","autoReset":true}}"#
+        let decoded = try JSONDecoder().decode(ControlRequest.self, from: Data(json.utf8))
+        #expect(decoded.cmd == .sessionStatus)
+        #expect(decoded.args?.status == "completed")
+        #expect(decoded.args?.autoReset == true)
+    }
+
+    @Test func sessionStatusUnknownStateDecodesForServerToReject() throws {
+        // an unknown status string decodes fine; the server rejects it via AgentStatus(rawValue:) -> nil.
+        let json = #"{"cmd":"session.status","args":{"status":"bogus"}}"#
+        let decoded = try JSONDecoder().decode(ControlRequest.self, from: Data(json.utf8))
+        #expect(decoded.cmd == .sessionStatus)
+        #expect(decoded.args?.status == "bogus")
+        #expect(AgentStatus(rawValue: decoded.args?.status ?? "") == nil)
+    }
+
     @Test func modeBearingCommandsRoundTrip() throws {
         let cases: [ControlRequest] = [
             ControlRequest(cmd: .sessionSplit, target: "active", args: ControlArgs(mode: "toggle")),

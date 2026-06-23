@@ -38,6 +38,11 @@ public final class Session: Identifiable {
     /// never survives a relaunch.
     public var unseenCount: Int = 0
 
+    /// The per-session agent status, driven over the control channel (`session.status`). Observed, so
+    /// the sidebar row's status glyph reacts. Ephemeral like `unseenCount`: `SessionSnapshot` doesn't
+    /// capture it, so it never survives a relaunch.
+    public var agentIndicator = AgentIndicator()
+
     /// The app-side surface (a `GhosttySurfaceView`). Lazily created on first
     /// display and owned here so it survives sidebar/detail view churn.
     @ObservationIgnored public var surface: (any TerminalSurface)?

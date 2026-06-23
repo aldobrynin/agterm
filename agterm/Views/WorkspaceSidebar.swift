@@ -19,6 +19,10 @@ private final class SidebarCellView: NSTableCellView {
     /// workspace's roll-up), drawn as a small accent capsule. Hidden when 0.
     let badge = BadgeView()
 
+    /// Agent-status glyph drawn just left of the count badge, fed from the session's `agentIndicator`.
+    /// Hidden on `.idle` (workspace rows always idle for now).
+    let statusIcon = StatusIconView()
+
     /// Color the row text/icon from the terminal theme: a selected row pairs with the selection
     /// foreground (over the selection-background pill the row draws), or white over the soft wash when
     /// the theme exposes no selection color; an unselected row uses the theme foreground, icons dimmed.
@@ -79,6 +83,81 @@ private final class BadgeView: NSView {
         let size = text.size(withAttributes: textAttributes)
         let origin = NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2)
         text.draw(at: origin, withAttributes: textAttributes)
+    }
+}
+
+/// A small SF-Symbol agent-status glyph drawn just left of the count badge: `active` is a blue
+/// ellipsis, `blocked` an amber exclamation, `completed` a green check (all `.circle.fill` for a
+/// consistent silhouette). Hidden on `.idle`. Exposed to accessibility as an `agent-status` static
+/// text whose value is the state name (so XCUITest matches `app.staticTexts["agent-status"]`). Blink
+/// is a layer `opacity` `CABasicAnimation` (autoreverse/repeat), added only while visible AND blinking.
+private final class StatusIconView: NSImageView {
+    private static let blinkKey = "agent-status-blink"
+    private static let glyphWidth: CGFloat = 16
+
+    /// The view's width, collapsed to 0 on `.idle` so a status-less row reclaims the slot (and its
+    /// label truncates full-width); `glyphWidth` when a glyph shows. Activated in init, toggled in `apply`.
+    private lazy var widthConstraint = widthAnchor.constraint(equalToConstant: 0)
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        imageScaling = .scaleProportionallyUpOrDown
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityIdentifier("agent-status")
+        widthConstraint.isActive = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder _: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// apply renders the indicator's tinted glyph (hiding the view and stopping any blink on `.idle`),
+    /// updates the accessibility value to the state name, and starts/stops the blink animation.
+    func apply(_ indicator: AgentIndicator) {
+        guard indicator.status != .idle else {
+            isHidden = true
+            image = nil
+            widthConstraint.constant = 0 // collapse the slot so the name reads full-width
+            setAccessibilityValue(AgentStatus.idle.rawValue)
+            stopBlink()
+            return
+        }
+        isHidden = false
+        image = Self.icon(for: indicator.status)
+        widthConstraint.constant = Self.glyphWidth
+        setAccessibilityValue(indicator.status.rawValue)
+        indicator.blink ? startBlink() : stopBlink()
+    }
+
+    private func startBlink() {
+        guard layer?.animation(forKey: Self.blinkKey) == nil else { return }
+        let blink = CABasicAnimation(keyPath: "opacity")
+        blink.fromValue = 1.0
+        blink.toValue = 0.2
+        blink.duration = 0.5
+        blink.autoreverses = true
+        blink.repeatCount = .greatestFiniteMagnitude
+        layer?.add(blink, forKey: Self.blinkKey)
+    }
+
+    private func stopBlink() {
+        layer?.removeAnimation(forKey: Self.blinkKey)
+    }
+
+    private static func icon(for status: AgentStatus) -> NSImage? {
+        let symbol: String
+        let color: NSColor
+        switch status {
+        case .active: (symbol, color) = ("ellipsis.circle.fill", .systemBlue)
+        case .blocked: (symbol, color) = ("exclamationmark.circle.fill", .systemOrange)
+        case .completed: (symbol, color) = ("checkmark.circle.fill", .systemGreen)
+        case .idle: return nil // unreachable: `apply` returns early on `.idle` before drawing
+        }
+        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [color]))
+        return NSImage(systemSymbolName: symbol, accessibilityDescription: status.rawValue)?
+            .withSymbolConfiguration(config)
     }
 }
 
@@ -144,8 +223,15 @@ private final class SidebarNode {
 struct WorkspaceSidebar: NSViewRepresentable {
     @Bindable var store: AppStore
     let actions: AppActions
+    /// True only when this representable's window is the frontmost one. Passed down from
+    /// `WindowContentView` (computed as `library.activeWindowID == windowID`); because the parent
+    /// re-renders on a frontmost flip, a fresh Bool re-runs `updateNSView` — the whole reactive path
+    /// for the agent-status visibility gate, with no `WindowLibrary` read inside the representable.
+    let isFrontmostWindow: Bool
 
-    func makeCoordinator() -> Coordinator { Coordinator(store: store, actions: actions) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(store: store, actions: actions, isFrontmostWindow: isFrontmostWindow)
+    }
 
     func makeNSView(context: Context) -> NSScrollView {
         let outline = SidebarOutlineView()
@@ -199,10 +285,16 @@ struct WorkspaceSidebar: NSViewRepresentable {
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         // touching the observed store properties here registers this representable as an observer, so
         // SwiftUI re-invokes updateNSView when the tree shape, selection, any session's name/displayName,
-        // split state, or unseen count changes. folding all of those into the read is what lets reconcile
-        // do a targeted per-row reload for a content change; a touch inside viewFor wouldn't register it.
-        _ = store.workspaces.map { ($0.id, $0.name, $0.unseenCount, $0.sessions.map { ($0.id, $0.displayName, $0.hasSplit, $0.unseenCount) }) }
+        // split state, unseen count, or agent status changes. folding all of those into the read is what
+        // lets reconcile do a targeted per-row reload for a content change; a touch inside viewFor wouldn't
+        // register it. agentIndicator + selection feed the status-icon visibility gate. the badge-visibility
+        // toggle (GhosttyApp.notificationBadgeEnabled) is NOT observable, so it drives a re-reconcile via the
+        // .agtermAppearanceChanged notification (appearanceChanged), like compactToolbar — not this read.
+        _ = store.workspaces.map { ($0.id, $0.name, $0.unseenCount, $0.sessions.map { ($0.id, $0.displayName, $0.hasSplit, $0.unseenCount, $0.agentIndicator) }) }
         _ = store.selectedSessionID
+        // the parent passes a fresh isFrontmostWindow on a frontmost flip; sync it so reconcile's gate
+        // re-evaluates (a non-frontmost window's selected session keeps showing its icon).
+        context.coordinator.isFrontmostWindow = isFrontmostWindow
         context.coordinator.reconcile()
         context.coordinator.syncSelection()
     }
@@ -214,6 +306,10 @@ struct WorkspaceSidebar: NSViewRepresentable {
     final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSTextFieldDelegate {
         private let store: AppStore
         private let actions: AppActions
+        /// True only when this coordinator's window is frontmost. Drives the agent-status visibility
+        /// gate: the selected session of the frontmost window hides its icon. Set by `updateNSView` from
+        /// the fresh Bool the parent passes on a frontmost flip.
+        var isFrontmostWindow: Bool
         weak var outlineView: NSOutlineView?
 
         /// Root workspace nodes in store order. Rebuilt (in place, reusing cached
@@ -247,9 +343,10 @@ struct WorkspaceSidebar: NSViewRepresentable {
         /// reconcile reloads only the rows whose content changed. An absent key ≠ any real content.
         private var lastRowContent: [UUID: RowContent] = [:]
 
-        init(store: AppStore, actions: AppActions) {
+        init(store: AppStore, actions: AppActions, isFrontmostWindow: Bool) {
             self.store = store
             self.actions = actions
+            self.isFrontmostWindow = isFrontmostWindow
             super.init()
             // the menu/palette can't reach the inline editor directly, so they post a
             // notification and this coordinator starts the edit on the selected row.
@@ -276,7 +373,12 @@ struct WorkspaceSidebar: NSViewRepresentable {
             outline.enumerateAvailableRowViews { rowView, _ in rowView.needsDisplay = true }
         }
 
-        @objc private func appearanceChanged() { refreshSelectionAppearance() }
+        @objc private func appearanceChanged() {
+            refreshSelectionAppearance()
+            // a settings change may have flipped the badge-visibility toggle; reconcile so the gated
+            // unseen count (0 when off, the real count when on) reloads the affected badge rows.
+            reconcile()
+        }
 
         @objc private func beginRenameSessionNotified() {
             guard let id = store.selectedSessionID, let node = nodeCache[id] else { return }
@@ -302,12 +404,31 @@ struct WorkspaceSidebar: NSViewRepresentable {
         }
 
         /// A row's visible content: its label (workspace name or session `displayName`), whether the
-        /// session has a split (the split-rectangle icon), and the unseen-badge count. A delta reloads
-        /// just that one row. Uses `hasSplit` (not `isSplit`) so the icon persists while a split is hidden.
+        /// session has a split (the split-rectangle icon), the unseen-badge count, and the GATED
+        /// agent-status indicator (after the frontmost-selected hide). A delta reloads just that one row.
+        /// Uses `hasSplit` (not `isSplit`) so the icon persists while a split is hidden.
         private struct RowContent: Equatable {
             let label: String
             let hasSplit: Bool
             let unseen: Int
+            let indicator: AgentIndicator
+        }
+
+        /// The agent-status indicator after the visibility gate: hidden (`.idle`) when this is the
+        /// frontmost window's selected session (you're looking at it), else the session's own indicator.
+        /// `NSApp.isActive` is deliberately not in the gate (it would flicker the selected row on every
+        /// app-switch). A workspace row never carries one.
+        private func effectiveIndicator(forSession id: UUID) -> AgentIndicator {
+            guard let session = store.session(withID: id) else { return AgentIndicator() }
+            if isFrontmostWindow, id == store.selectedSessionID { return AgentIndicator() }
+            return session.agentIndicator
+        }
+
+        /// The unseen-count after the badge-visibility gate: 0 (hidden) when the Settings badge toggle
+        /// is off, else the raw count. Render-only — `unseenCount` keeps tracking, so re-enabling the
+        /// toggle instantly shows the current counts. The agent-status glyph is NOT gated by this.
+        private func effectiveUnseen(_ count: Int) -> Int {
+            GhosttyApp.shared.notificationBadgeEnabled ? count : 0
         }
 
         /// Decides between a full rebuild (a SHAPE change: add/move/close/reorder) and a targeted
@@ -337,9 +458,13 @@ struct WorkspaceSidebar: NSViewRepresentable {
                 if let node = nodeCache[id] { outline.reloadItem(node) }
             }
             for workspace in store.workspaces {
-                reloadIfChanged(workspace.id, RowContent(label: workspace.name, hasSplit: false, unseen: workspace.unseenCount))
+                reloadIfChanged(workspace.id, RowContent(label: workspace.name, hasSplit: false,
+                                                         unseen: effectiveUnseen(workspace.unseenCount),
+                                                         indicator: AgentIndicator()))
                 for session in workspace.sessions {
-                    reloadIfChanged(session.id, RowContent(label: session.displayName, hasSplit: session.hasSplit, unseen: session.unseenCount))
+                    reloadIfChanged(session.id, RowContent(label: session.displayName, hasSplit: session.hasSplit,
+                                                           unseen: effectiveUnseen(session.unseenCount),
+                                                           indicator: effectiveIndicator(forSession: session.id)))
                 }
             }
         }
@@ -349,9 +474,13 @@ struct WorkspaceSidebar: NSViewRepresentable {
         private func snapshotRowContent() {
             var snapshot: [UUID: RowContent] = [:]
             for workspace in store.workspaces {
-                snapshot[workspace.id] = RowContent(label: workspace.name, hasSplit: false, unseen: workspace.unseenCount)
+                snapshot[workspace.id] = RowContent(label: workspace.name, hasSplit: false,
+                                                    unseen: effectiveUnseen(workspace.unseenCount),
+                                                    indicator: AgentIndicator())
                 for session in workspace.sessions {
-                    snapshot[session.id] = RowContent(label: session.displayName, hasSplit: session.hasSplit, unseen: session.unseenCount)
+                    snapshot[session.id] = RowContent(label: session.displayName, hasSplit: session.hasSplit,
+                                                      unseen: effectiveUnseen(session.unseenCount),
+                                                      indicator: effectiveIndicator(forSession: session.id))
                 }
             }
             lastRowContent = snapshot
@@ -519,8 +648,9 @@ struct WorkspaceSidebar: NSViewRepresentable {
             field.isEditable = false
             field.isBordered = false
             field.drawsBackground = false
-            // a recycled cell may carry the prior row's badge; reset before use
+            // a recycled cell may carry the prior row's badge/status; reset before use
             applyBadge(toCell: cell, count: 0)
+            cell.statusIcon.apply(AgentIndicator())
             switch node.kind {
             case .workspace:
                 let workspace = store.workspaces.first(where: { $0.id == node.id })
@@ -530,7 +660,8 @@ struct WorkspaceSidebar: NSViewRepresentable {
                 // expose the workspace name so app.staticTexts["workspace 1"] resolves
                 field.setAccessibilityLabel(workspace?.name ?? "")
                 // roll-up badge so an unseen notification stays visible when the workspace is collapsed
-                applyBadge(toCell: cell, count: workspace?.unseenCount ?? 0)
+                // (gated by the Settings badge toggle, like the session badge below)
+                applyBadge(toCell: cell, count: effectiveUnseen(workspace?.unseenCount ?? 0))
                 cell.imageView?.image = workspaceIcon
                 cell.imageView?.setAccessibilityIdentifier("workspace-icon")
             case .session:
@@ -539,7 +670,9 @@ struct WorkspaceSidebar: NSViewRepresentable {
                 field.setAccessibilityIdentifier("session-row")
                 field.setAccessibilityLabel(nil)
                 let session = store.session(withID: node.id)
-                applyBadge(toCell: cell, count: session?.unseenCount ?? 0)
+                applyBadge(toCell: cell, count: effectiveUnseen(session?.unseenCount ?? 0))
+                // gate the agent-status glyph: hidden for the frontmost window's selected session.
+                cell.statusIcon.apply(effectiveIndicator(forSession: node.id))
                 // a session with a split shows the split-rectangle icon (matching the toolbar split
                 // button) so it's distinguishable at a glance; `hasSplit` keeps it while merely hidden.
                 cell.imageView?.image = session?.hasSplit == true ? splitSessionIcon : sessionIcon
@@ -604,6 +737,12 @@ struct WorkspaceSidebar: NSViewRepresentable {
             cell.addSubview(field)
             cell.textField = field
 
+            let statusIcon = cell.statusIcon
+            statusIcon.translatesAutoresizingMaskIntoConstraints = false
+            statusIcon.setContentHuggingPriority(.required, for: .horizontal)
+            statusIcon.setContentCompressionResistancePriority(.required, for: .horizontal)
+            cell.addSubview(statusIcon)
+
             let badge = cell.badge
             badge.translatesAutoresizingMaskIntoConstraints = false
             badge.setContentHuggingPriority(.required, for: .horizontal)
@@ -617,9 +756,14 @@ struct WorkspaceSidebar: NSViewRepresentable {
                 icon.heightAnchor.constraint(equalToConstant: 16),
                 field.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
                 field.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                // chain: name (flex) | badge (trailing). the badge hugs its content, so the name
-                // truncates first and the badge stays whole.
-                field.trailingAnchor.constraint(equalTo: badge.leadingAnchor, constant: -6),
+                // chain: name (flex) | status icon | badge (trailing). the status icon and badge hug
+                // their content, so the name truncates first and both stay whole.
+                field.trailingAnchor.constraint(equalTo: statusIcon.leadingAnchor, constant: -6),
+                statusIcon.trailingAnchor.constraint(equalTo: badge.leadingAnchor, constant: -4),
+                statusIcon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                // width is owned by StatusIconView (0 when idle, glyph-width otherwise) so an idle row
+                // reclaims the slot; only the height is pinned here.
+                statusIcon.heightAnchor.constraint(equalToConstant: 16),
                 badge.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -2),
                 badge.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             ])

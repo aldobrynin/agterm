@@ -173,6 +173,32 @@ struct CommandsTests {
         #expect(try request(["session", "copy", "--target", "9f3c"]) == ControlRequest(cmd: .sessionCopy, target: "9f3c"))
     }
 
+    @Test func sessionStatusWithBlink() throws {
+        let req = try request(["session", "status", "active", "--blink"])
+        #expect(req.cmd == .sessionStatus)
+        #expect(req.args?.status == "active")
+        #expect(req.args?.blink == true)
+        #expect(req == ControlRequest(cmd: .sessionStatus, target: "active", args: ControlArgs(status: "active", blink: true)))
+    }
+
+    @Test func sessionStatusWithoutBlink() throws {
+        let req = try request(["session", "status", "completed", "--target", "s1"])
+        #expect(req.cmd == .sessionStatus)
+        #expect(req.args?.status == "completed")
+        #expect(req.args?.blink == nil)
+        #expect(req.args?.autoReset == nil)
+        #expect(req == ControlRequest(cmd: .sessionStatus, target: "s1", args: ControlArgs(status: "completed")))
+    }
+
+    @Test func sessionStatusWithAutoReset() throws {
+        let req = try request(["session", "status", "completed", "--auto-reset"])
+        #expect(req.cmd == .sessionStatus)
+        #expect(req.args?.status == "completed")
+        #expect(req.args?.autoReset == true)
+        #expect(req == ControlRequest(cmd: .sessionStatus, target: "active",
+                                      args: ControlArgs(status: "completed", autoReset: true)))
+    }
+
     @Test func sessionOverlayOpenWithCommandAndCwd() throws {
         let expected = ControlRequest(cmd: .sessionOverlayOpen, target: "9f3c",
                                       args: ControlArgs(cwd: "/b", command: "revdiff"))

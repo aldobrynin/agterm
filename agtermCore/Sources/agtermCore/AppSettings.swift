@@ -25,6 +25,11 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// default (on). Only gates the OS banner — the sidebar unseen-count badge tracks notifications
     /// either way.
     public var notificationsEnabled: Bool?
+    /// Whether the sidebar shows the red unseen-notification count badge (the count pill on session
+    /// rows and the collapsed-workspace roll-up). nil means the default (on). Render-only: the
+    /// unseen count keeps tracking, so turning it back on instantly shows the current counts.
+    /// Distinct from `notificationsEnabled`, which gates the OS banner.
+    public var notificationBadgeEnabled: Bool?
     /// Whether the window uses the compact title bar (a single short row with smaller icons) instead
     /// of the tall default that stacks the session name over the working-directory subtitle. nil
     /// means the default (off). Applied at the AppKit window level, NOT a ghostty key; in compact
@@ -33,7 +38,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     public init(fontFamily: String? = nil, fontSize: Double? = nil, theme: String? = nil,
                 backgroundOpacity: Double? = nil, backgroundBlur: Int? = nil, notificationsEnabled: Bool? = nil,
-                compactToolbar: Bool? = nil) {
+                compactToolbar: Bool? = nil, notificationBadgeEnabled: Bool? = nil) {
         self.fontFamily = fontFamily
         self.fontSize = fontSize
         self.theme = theme
@@ -41,6 +46,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.backgroundBlur = backgroundBlur
         self.notificationsEnabled = notificationsEnabled
         self.compactToolbar = compactToolbar
+        self.notificationBadgeEnabled = notificationBadgeEnabled
     }
 
     /// The ghostty config lines for the set fields, one `key = value` per line, suitable for a

@@ -20,11 +20,12 @@ final class SettingsModel {
         self.library = library
         self.settingsStore = settingsStore
         self.settings = settingsStore.load()
-        // mirror the persisted window translucency + notification toggle + compact toolbar into
-        // their shared channels at launch, before any settings change fires.
+        // mirror the persisted window translucency + notification toggle + compact toolbar + badge
+        // toggle into their shared channels at launch, before any settings change fires.
         applyWindowTranslucency()
         applyNotificationsEnabled()
         applyCompactToolbar()
+        applyNotificationBadgeEnabled()
     }
 
     func setFontFamily(_ value: String?) { settings.fontFamily = value; persistAndApply() }
@@ -34,6 +35,7 @@ final class SettingsModel {
     func setBackgroundBlur(_ value: Int?) { settings.backgroundBlur = value; persistAndApply() }
     func setNotificationsEnabled(_ value: Bool?) { settings.notificationsEnabled = value; persistAndApply() }
     func setCompactToolbar(_ value: Bool?) { settings.compactToolbar = value; persistAndApply() }
+    func setNotificationBadgeEnabled(_ value: Bool?) { settings.notificationBadgeEnabled = value; persistAndApply() }
 
     private func persistAndApply() {
         try? settingsStore.save(settings)
@@ -51,6 +53,7 @@ final class SettingsModel {
         applyWindowTranslucency()
         applyNotificationsEnabled()
         applyCompactToolbar()
+        applyNotificationBadgeEnabled()
         // refresh the app chrome (title bar + sidebar + quick terminal) with the new terminal color,
         // window translucency, and toolbar style immediately, rather than only when the window next
         // re-keys. The title-bar re-sync and the cwd-subtitle drop both ride this notification.
@@ -68,6 +71,10 @@ final class SettingsModel {
 
     private func applyCompactToolbar() {
         GhosttyApp.shared.setCompactToolbar(settings.compactToolbar ?? false)
+    }
+
+    private func applyNotificationBadgeEnabled() {
+        GhosttyApp.shared.setNotificationBadgeEnabled(settings.notificationBadgeEnabled ?? true)
     }
 
     /// Write the ghostty config lines (font/size/theme + the translucency pins) to the file

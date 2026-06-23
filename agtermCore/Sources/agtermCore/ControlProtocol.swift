@@ -17,6 +17,7 @@ public enum Command: String, Codable, Sendable {
     case sessionMove = "session.move"
     case workspaceMove = "workspace.move"
     case sessionType = "session.type"
+    case sessionStatus = "session.status"
     case sessionSplit = "session.split"
     case sessionFocus = "session.focus"
     case sessionCopy = "session.copy"
@@ -82,12 +83,19 @@ public struct ControlArgs: Codable, Sendable, Equatable {
     public var y: Int?
     /// Target display index (into the screen list) for `window.move`; nil = the window's current display.
     public var display: Int?
+    /// Agent state for `session.status` (`idle|active|completed|blocked`).
+    public var status: String?
+    /// Whether the `session.status` indicator pulses for attention.
+    public var blink: Bool?
+    /// Whether the `session.status` indicator resets to idle once the session is visited (selected).
+    public var autoReset: Bool?
 
     public init(name: String? = nil, cwd: String? = nil, workspace: String? = nil, text: String? = nil,
                 select: Bool? = nil, mode: String? = nil, command: String? = nil, wait: Bool? = nil,
                 sizePercent: Int? = nil, window: String? = nil, pane: String? = nil, to: String? = nil,
                 title: String? = nil, body: String? = nil, width: Int? = nil, height: Int? = nil,
-                x: Int? = nil, y: Int? = nil, display: Int? = nil) {
+                x: Int? = nil, y: Int? = nil, display: Int? = nil, status: String? = nil, blink: Bool? = nil,
+                autoReset: Bool? = nil) {
         self.name = name
         self.cwd = cwd
         self.workspace = workspace
@@ -107,6 +115,9 @@ public struct ControlArgs: Codable, Sendable, Equatable {
         self.x = x
         self.y = y
         self.display = display
+        self.status = status
+        self.blink = blink
+        self.autoReset = autoReset
     }
 }
 

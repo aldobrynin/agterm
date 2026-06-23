@@ -257,7 +257,7 @@ private struct WindowContentView: View {
             Rectangle()
                 .fill(Color.white.opacity(0.1))
                 .frame(height: 1)
-            WorkspaceSidebar(store: store, actions: actions)
+            WorkspaceSidebar(store: store, actions: actions, isFrontmostWindow: isFrontmost)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
         .safeAreaInset(edge: .bottom) { bottomBar }

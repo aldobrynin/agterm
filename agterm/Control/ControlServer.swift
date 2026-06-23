@@ -403,6 +403,10 @@ final class ControlServer {
             return splitSession(request.target, window: request.args?.window, mode: request.args?.mode)
         case .sessionFocus:
             return focusSessionPane(request.target, window: request.args?.window, pane: request.args?.pane)
+        case .sessionStatus:
+            return setSessionStatus(request.target, window: request.args?.window,
+                                    status: request.args?.status, blink: request.args?.blink,
+                                    autoReset: request.args?.autoReset)
         case .sessionCopy:
             return copySelection(request.target, window: request.args?.window)
         case .sessionOverlayOpen:
@@ -522,6 +526,23 @@ final class ControlServer {
             default: return ControlResponse(ok: false, error: "invalid pane: \(pane)")
             }
             actions.setSplitFocus(toSplit, of: session)
+            return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
+        }
+    }
+
+    /// Set the target session's agent-status indicator (control-native: no GUI/menu equivalent, like
+    /// `notify`/`session.type`/`session.copy`). `status` is `idle|active|completed|blocked`; an unknown
+    /// value is the structured `invalid status` error. `blink` (default false) pulses the glyph;
+    /// `autoReset` (default false) clears the indicator to idle once the session is visited. The
+    /// indicator is ephemeral and rendered only on sessions you are not currently looking at.
+    private func setSessionStatus(_ target: String?, window: String?, status: String?, blink: Bool?,
+                                  autoReset: Bool?) -> ControlResponse {
+        guard let parsed = AgentStatus(rawValue: status ?? "") else {
+            return ControlResponse(ok: false, error: "invalid status")
+        }
+        return resolveSession(target, window: window) { store, id in
+            store.setAgentIndicator(AgentIndicator(status: parsed, blink: blink ?? false,
+                                                   autoReset: autoReset ?? false), forSession: id)
             return ControlResponse(ok: true, result: ControlResult(id: id.uuidString))
         }
     }

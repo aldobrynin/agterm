@@ -75,4 +75,15 @@ struct AppSettingsTests {
         // window-chrome toggle applied at the AppKit level, never a ghostty config key
         #expect(AppSettings(compactToolbar: true).ghosttyConfigLines().isEmpty)
     }
+
+    @Test func notificationBadgeEnabledDefaultsNil() {
+        #expect(AppSettings().notificationBadgeEnabled == nil)
+    }
+
+    @Test func notificationBadgeEnabledRoundTripsAndIsNotAConfigLine() throws {
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(AppSettings(notificationBadgeEnabled: false)))
+        #expect(decoded.notificationBadgeEnabled == false)
+        // app-level sidebar render toggle, never a ghostty config key
+        #expect(AppSettings(notificationBadgeEnabled: false).ghosttyConfigLines().isEmpty)
+    }
 }

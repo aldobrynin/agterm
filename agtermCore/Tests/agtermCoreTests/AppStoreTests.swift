@@ -108,6 +108,66 @@ struct AppStoreTests {
         store.clearUnseen(UUID()) // unknown id is a no-op, no crash
     }
 
+    @Test func setAgentIndicatorSetsFieldOnRightSession() {
+        let store = Self.makeStore()
+        let ws = store.addWorkspace(name: "work")
+        let a = store.addSession(toWorkspace: ws.id, cwd: "/a")!
+        let b = store.addSession(toWorkspace: ws.id, cwd: "/b")!
+        store.setAgentIndicator(AgentIndicator(status: .active, blink: true), forSession: a.id)
+        #expect(a.agentIndicator == AgentIndicator(status: .active, blink: true))
+        #expect(b.agentIndicator == AgentIndicator()) // other sessions are untouched
+    }
+
+    @Test func setAgentIndicatorUnknownSessionIsNoop() {
+        let store = Self.makeStore()
+        let ws = store.addWorkspace(name: "work")
+        let a = store.addSession(toWorkspace: ws.id, cwd: "/a")!
+        store.setAgentIndicator(AgentIndicator(status: .blocked), forSession: UUID()) // unknown id: no crash
+        #expect(a.agentIndicator == AgentIndicator()) // existing session untouched
+    }
+
+    @Test func agentIndicatorDoesNotSurviveSnapshotRestore() {
+        let store = Self.makeStore()
+        let ws = store.addWorkspace(name: "work")
+        let session = store.addSession(toWorkspace: ws.id, cwd: "/a")!
+        store.setAgentIndicator(AgentIndicator(status: .completed, blink: true), forSession: session.id)
+        let restored = Self.makeStore()
+        restored.restore(from: store.snapshot())
+        // the indicator is ephemeral: a restored session falls back to the default idle state.
+        #expect(restored.workspaces[0].sessions[0].agentIndicator == AgentIndicator())
+    }
+
+    @Test func selectSessionKeepsNonAutoResetIndicator() {
+        let store = Self.makeStore()
+        let ws = store.addWorkspace(name: "work")
+        let a = store.addSession(toWorkspace: ws.id, cwd: "/a")!
+        let b = store.addSession(toWorkspace: ws.id, cwd: "/b")!
+        store.setAgentIndicator(AgentIndicator(status: .active), forSession: a.id) // autoReset defaults false
+        store.selectSession(a.id) // a non-auto-reset indicator survives a visit (keep-state)
+        #expect(a.agentIndicator == AgentIndicator(status: .active))
+        store.selectSession(b.id)
+        #expect(a.agentIndicator == AgentIndicator(status: .active)) // still set after switching away
+    }
+
+    @Test func selectSessionResetsAutoResetIndicator() {
+        let store = Self.makeStore()
+        let ws = store.addWorkspace(name: "work")
+        let a = store.addSession(toWorkspace: ws.id, cwd: "/a")!
+        store.setAgentIndicator(AgentIndicator(status: .completed, autoReset: true), forSession: a.id)
+        store.selectSession(a.id) // visiting an auto-reset indicator clears it to idle for good
+        #expect(a.agentIndicator == AgentIndicator())
+    }
+
+    @Test func selectSessionDoesNotResetUnrelatedAutoResetIndicator() {
+        let store = Self.makeStore()
+        let ws = store.addWorkspace(name: "work")
+        let a = store.addSession(toWorkspace: ws.id, cwd: "/a")!
+        let b = store.addSession(toWorkspace: ws.id, cwd: "/b")!
+        store.setAgentIndicator(AgentIndicator(status: .completed, autoReset: true), forSession: a.id)
+        store.selectSession(b.id) // selecting a different session leaves a's indicator alone
+        #expect(a.agentIndicator == AgentIndicator(status: .completed, autoReset: true))
+    }
+
     @Test func workspaceForSessionDerivesOwner() {
         let store = Self.makeStore()
         let work = store.addWorkspace(name: "work")

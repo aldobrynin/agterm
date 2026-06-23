@@ -393,6 +393,106 @@ final class ControlAPIUITests: XCTestCase {
         XCTAssertTrue((bad["error"] as? String ?? "").contains("invalid pane"), "should report invalid pane: \(bad)")
     }
 
+    // session.status sets a session's agent indicator: a valid state returns ok + the resolved id, an
+    // unknown state returns the literal `invalid status` error, and an unknown target is not-found.
+    func testSessionStatusSetsIndicator() throws {
+        let tree = try sendCommand(#"{"cmd":"tree"}"#)
+        let treeResult = try XCTUnwrap(tree["result"] as? [String: Any], "tree should carry a result")
+        let root = try XCTUnwrap(treeResult["tree"] as? [String: Any], "result should carry a tree")
+        let workspaces = try XCTUnwrap(root["workspaces"] as? [[String: Any]], "tree should list workspaces")
+        let sessions = try XCTUnwrap(workspaces.first?["sessions"] as? [[String: Any]], "workspace should list sessions")
+        let seeded = try XCTUnwrap(sessions.first?["id"] as? String, "should have a seeded session id")
+
+        // a valid state with a blink flag succeeds and echoes the resolved id.
+        let ok = try sendCommand(#"{"cmd":"session.status","target":"\#(seeded)","args":{"status":"active","blink":true}}"#)
+        XCTAssertEqual(ok["ok"] as? Bool, true, "session.status active should succeed: \(ok)")
+        let result = try XCTUnwrap(ok["result"] as? [String: Any], "session.status should carry a result")
+        XCTAssertEqual((result["id"] as? String)?.lowercased(), seeded.lowercased(),
+                       "session.status should return the resolved session id: \(ok)")
+
+        // an unknown state returns the literal guard string the arm emits.
+        let bad = try sendCommand(#"{"cmd":"session.status","target":"\#(seeded)","args":{"status":"bogus"}}"#)
+        XCTAssertEqual(bad["ok"] as? Bool, false, "an unknown status should fail: \(bad)")
+        XCTAssertEqual(bad["error"] as? String, "invalid status", "should report invalid status: \(bad)")
+
+        // an unknown target is the structured not-found error (mirrors testUnknownTargetErrors).
+        let unknown = try sendCommand(#"{"cmd":"session.status","target":"deadbeef","args":{"status":"active"}}"#)
+        XCTAssertEqual(unknown["ok"] as? Bool, false, "an unknown target should fail: \(unknown)")
+        let error = try XCTUnwrap(unknown["error"] as? String, "an unknown target should carry an error")
+        XCTAssertTrue(error.hasPrefix("no such session"), "should report no such session, got: \(error)")
+    }
+
+    // the agent-status icon is gated by the visibility rule: it shows only on a session that is NOT the
+    // frontmost window's selected one. Set status on a non-selected session → the icon appears; select that
+    // session → it hides; select a different session → it reappears (mirrors the notify-badge test).
+    func testAgentStatusIconShowsOnUnselectedRowAndHidesOnSelect() throws {
+        let tree = try sendCommand(#"{"cmd":"tree"}"#)
+        let treeResult = try XCTUnwrap(tree["result"] as? [String: Any], "tree should carry a result")
+        let root = try XCTUnwrap(treeResult["tree"] as? [String: Any], "result should carry a tree")
+        let workspaces = try XCTUnwrap(root["workspaces"] as? [[String: Any]], "tree should list workspaces")
+        let sessions = try XCTUnwrap(workspaces.first?["sessions"] as? [[String: Any]], "workspace should list sessions")
+        let seeded = try XCTUnwrap(sessions.first?["id"] as? String, "should have a seeded session id")
+
+        // a second session takes focus, leaving the seeded one realized but non-selected.
+        let created = try sendCommand(#"{"cmd":"session.new"}"#)
+        let createdResult = try XCTUnwrap(created["result"] as? [String: Any], "session.new should carry a result")
+        let secondID = try XCTUnwrap(createdResult["id"] as? String, "session.new should return the new id")
+        XCTAssertTrue(pollSessionCount(2, timeout: 10), "the new session should land")
+
+        // negative baseline: no status set yet, so no agent-status icon exists on any row — this makes
+        // the "appears" assertion below meaningful (it's a transition, not a pre-existing element).
+        XCTAssertTrue(app.staticTexts["agent-status"].waitForNonExistence(timeout: 5),
+                      "no agent-status icon should exist before any status is set")
+
+        // set active status on the non-selected seeded session: the gate lets its icon show.
+        let status = try sendCommand(#"{"cmd":"session.status","target":"\#(seeded)","args":{"status":"active"}}"#)
+        XCTAssertEqual(status["ok"] as? Bool, true, "session.status active should succeed: \(status)")
+        XCTAssertTrue(app.staticTexts["agent-status"].waitForExistence(timeout: 12),
+                      "the status icon should appear on the non-selected session's row")
+
+        // selecting the session (now the frontmost window's selected one) hides its icon.
+        XCTAssertEqual(try sendCommand(#"{"cmd":"session.select","target":"\#(seeded)"}"#)["ok"] as? Bool, true)
+        XCTAssertTrue(app.staticTexts["agent-status"].waitForNonExistence(timeout: 12),
+                      "selecting the session should hide its status icon")
+
+        // switching away to a different session re-reveals the icon (status is never auto-reset).
+        XCTAssertEqual(try sendCommand(#"{"cmd":"session.select","target":"\#(secondID)"}"#)["ok"] as? Bool, true)
+        XCTAssertTrue(app.staticTexts["agent-status"].waitForExistence(timeout: 12),
+                      "switching away should re-reveal the status icon")
+    }
+
+    // the General → "Show notification badges" toggle gates the red count pill's RENDERING (the count
+    // keeps tracking either way): fire a notification on a non-selected session so notify-badge shows,
+    // toggle the setting off → the badge hides, toggle on → it reappears with the same count.
+    func testNotificationBadgeToggleHidesAndShowsBadge() throws {
+        let tree = try sendCommand(#"{"cmd":"tree"}"#)
+        let treeResult = try XCTUnwrap(tree["result"] as? [String: Any], "tree should carry a result")
+        let root = try XCTUnwrap(treeResult["tree"] as? [String: Any], "result should carry a tree")
+        let workspaces = try XCTUnwrap(root["workspaces"] as? [[String: Any]], "tree should list workspaces")
+        let sessions = try XCTUnwrap(workspaces.first?["sessions"] as? [[String: Any]], "workspace should list sessions")
+        let seeded = try XCTUnwrap(sessions.first?["id"] as? String, "should have a seeded session id")
+
+        // a second session takes focus, leaving the seeded one non-selected so its badge persists.
+        XCTAssertEqual(try sendCommand(#"{"cmd":"session.new"}"#)["ok"] as? Bool, true)
+        XCTAssertTrue(pollSessionCount(2, timeout: 10), "the new session should land")
+
+        // notify (no focus-suppression) bumps the non-selected session's unseen count → the badge shows.
+        let notified = try sendCommand(#"{"cmd":"notify","target":"\#(seeded)","args":{"body":"hi"}}"#)
+        XCTAssertEqual(notified["ok"] as? Bool, true, "notify should succeed: \(notified)")
+        XCTAssertTrue(app.staticTexts["notify-badge"].waitForExistence(timeout: 12),
+                      "the count badge should appear on the non-selected session's row")
+
+        // turn the count badges off → the pill hides (render-only; the count keeps tracking).
+        toggleNotificationBadges()
+        XCTAssertTrue(app.staticTexts["notify-badge"].waitForNonExistence(timeout: 12),
+                      "hiding the badge setting should hide the count pill")
+
+        // turn it back on → the pill reappears with the still-tracked count.
+        toggleNotificationBadges()
+        XCTAssertTrue(app.staticTexts["notify-badge"].waitForExistence(timeout: 12),
+                      "re-enabling the badge setting should show the count pill again")
+    }
+
     // session.go navigates the selection in the sidebar's flattened order and returns the newly-selected
     // id: seed two sessions with the first selected, then next/last/first/prev step the selection and the
     // returned id (and the persisted selectedSessionID) track it. wrap is covered by the agtermCore tests.
@@ -994,6 +1094,25 @@ final class ControlAPIUITests: XCTestCase {
             usleep(150_000)
         }
         return !element.exists
+    }
+
+    /// Opens Settings (Cmd+,), switches to General, and clicks the "Show notification badges" toggle.
+    /// Retries the tab/toggle click each tick (a stale or half-open Settings window can drop the first
+    /// click), mirroring SettingsUITests' robust `settingsControl`.
+    private func toggleNotificationBadges() {
+        let toggle = app.descendants(matching: .any).matching(identifier: "settings-notification-badges").firstMatch
+        let tabButton = app.buttons["General"].firstMatch
+        let deadline = Date().addingTimeInterval(12)
+        while Date() < deadline {
+            if toggle.exists, toggle.isHittable { toggle.click(); return }
+            if tabButton.exists, tabButton.isHittable {
+                tabButton.click()
+            } else {
+                app.typeKey(",", modifierFlags: .command) // settings not open yet (or lost) — (re)open
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        XCTFail("the notification-badges toggle never became hittable")
     }
 
     /// Terminate the running app, write `snapshot` as the (single) window's per-window snapshot file,

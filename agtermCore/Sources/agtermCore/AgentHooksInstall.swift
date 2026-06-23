@@ -1,0 +1,148 @@
+import Foundation
+
+/// Pure, host-free helpers for installing the agent-status hooks package. The app side does the
+/// actual filesystem work (copying the bundled scripts, writing the files, the `.bak` backup); this
+/// type owns only the testable string/JSON transforms — given the current file contents and the
+/// installed script directory it returns the new contents plus a `changed` flag, all idempotent.
+public enum AgentHooksInstall {
+    /// The wrapper script the hooks invoke, installed into the script directory.
+    public static let wrapperName = "agterm-agent-status.sh"
+
+    /// The shell integration script sourced from the user's rc files, relative to the script directory.
+    public static let integrationRelativePath = "shell/integration.sh"
+
+    /// Marker lines bracketing the agterm-managed block in a shell rc file. The opening marker is also
+    /// the idempotency probe (present → already installed).
+    public static let rcMarkerBegin = "# >>> agterm agent-status >>>"
+    public static let rcMarkerEnd = "# <<< agterm agent-status <<<"
+
+    /// The Claude Code hook events the merge installs, paired with the agent state (plus any flags)
+    /// each maps to. `Notification` additionally carries the `permission_prompt` matcher (the others are
+    /// unmatched). Only the `Stop`→`completed` hook passes `--auto-reset` (it clears on visit); `active`
+    /// and `blocked` stay keep-state.
+    static let claudeHooks: [(event: String, matcher: String?, state: String)] = [
+        ("UserPromptSubmit", nil, "active"),
+        ("Stop", nil, "completed --auto-reset"),
+        ("Notification", "permission_prompt", "blocked"),
+    ]
+
+    /// Thrown by `mergeClaudeSettings` when the existing `settings.json` is non-empty but not a valid
+    /// JSON object: the installer refuses to overwrite a hand-maintained file it cannot safely parse.
+    public enum MergeError: Error { case malformedExistingSettings }
+
+    /// merge the three agent-status hooks into an existing Claude Code `settings.json`.
+    ///
+    /// `existing` is the current file contents (nil or empty = no file yet); `scriptDir` is the
+    /// directory the wrapper script was installed into. Returns the new JSON text and whether it
+    /// differs from `existing`. Idempotent: when the agterm hooks (detected by the wrapper command)
+    /// are already present, returns the input unchanged with `changed == false`. Unrelated hooks and
+    /// keys are preserved; an absent/empty existing file starts from a fresh object, but a non-empty
+    /// file that is not valid JSON throws `MergeError.malformedExistingSettings` so the caller can leave
+    /// the user's hand-maintained file untouched rather than overwrite it.
+    public static func mergeClaudeSettings(existing: String?, scriptDir: String) throws -> (json: String, changed: Bool) {
+        let command = wrapperCommand(scriptDir: scriptDir)
+        var root = try parsedObject(existing)
+
+        var hooks = root["hooks"] as? [String: Any] ?? [:]
+        var didChange = false
+        for hook in claudeHooks {
+            var entries = hooks[hook.event] as? [[String: Any]] ?? []
+            if entries.contains(where: { entryUsesWrapper($0, scriptDir: scriptDir) }) {
+                continue // already installed for this event
+            }
+            entries.append(hookEntry(command: command, state: hook.state, matcher: hook.matcher))
+            hooks[hook.event] = entries
+            didChange = true
+        }
+        if !didChange {
+            return (existing ?? "", false)
+        }
+        root["hooks"] = hooks
+        return (serialize(root), true)
+    }
+
+    /// append the marker-guarded `source` line for the shell integration to a shell rc file.
+    ///
+    /// `existing` is the rc file's current contents; `scriptDir` is the installed script directory.
+    /// Returns the new contents and whether anything was appended. Idempotent: if the begin marker is
+    /// already present the input is returned unchanged with `changed == false`.
+    public static func appendShellRC(existing: String, scriptDir: String) -> (contents: String, changed: Bool) {
+        if existing.contains(rcMarkerBegin) {
+            return (existing, false) // already installed
+        }
+        let source = "source \(shellQuote(scriptDir + "/" + integrationRelativePath))"
+        var block = rcMarkerBegin + "\n" + source + "\n" + rcMarkerEnd + "\n"
+        if existing.isEmpty {
+            return (block, true)
+        }
+        // ensure exactly one blank line between prior content and the block
+        var prefix = existing
+        if !prefix.hasSuffix("\n") {
+            prefix += "\n"
+        }
+        block = "\n" + block
+        return (prefix + block, true)
+    }
+
+    /// derive a backup path for a file by appending `.bak` to its full path. `settings.json` →
+    /// `settings.json.bak`; the extension is left intact (the `.bak` is appended to the whole name).
+    public static func backupPath(for path: String) -> String {
+        path + ".bak"
+    }
+
+    /// the absolute wrapper-script path the installed hooks invoke, with state appended by the caller's
+    /// hook entry. e.g. `<scriptDir>/agterm-agent-status.sh`.
+    public static func wrapperPath(scriptDir: String) -> String {
+        scriptDir + "/" + wrapperName
+    }
+
+    // build the command string a Claude hook runs: the quoted wrapper path plus the state argument.
+    private static func wrapperCommand(scriptDir: String) -> String {
+        shellQuote(wrapperPath(scriptDir: scriptDir)) + " "
+    }
+
+    // a single Claude hook entry: { (matcher?), hooks: [{ type: command, command }] }.
+    private static func hookEntry(command: String, state: String, matcher: String?) -> [String: Any] {
+        var entry: [String: Any] = [
+            "hooks": [["type": "command", "command": command + state]],
+        ]
+        if let matcher {
+            entry["matcher"] = matcher
+        }
+        return entry
+    }
+
+    // does a hook entry already invoke our wrapper (idempotency probe, by wrapper path)?
+    private static func entryUsesWrapper(_ entry: [String: Any], scriptDir: String) -> Bool {
+        let probe = wrapperPath(scriptDir: scriptDir)
+        guard let commands = entry["hooks"] as? [[String: Any]] else { return false }
+        return commands.contains { ($0["command"] as? String)?.contains(probe) == true }
+    }
+
+    // parse existing JSON into a dictionary. absent/empty/whitespace-only → fresh empty object; a
+    // non-empty file that is not a valid JSON object → throw rather than silently discard the user's file.
+    private static func parsedObject(_ text: String?) throws -> [String: Any] {
+        guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [:] }
+        guard let data = text.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data),
+              let object = parsed as? [String: Any] else {
+            throw MergeError.malformedExistingSettings
+        }
+        return object
+    }
+
+    // serialize a dictionary to pretty-printed, sorted JSON text (deterministic for tests + diffs).
+    private static func serialize(_ object: [String: Any]) -> String {
+        let options: JSONSerialization.WritingOptions = [.prettyPrinted, .sortedKeys]
+        guard let data = try? JSONSerialization.data(withJSONObject: object, options: options),
+              let text = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return text + "\n"
+    }
+
+    // single-quote a string for safe embedding in a /bin/sh command (mirrors CLIInstall.shellQuote).
+    public static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+}

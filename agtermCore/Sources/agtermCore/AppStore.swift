@@ -91,11 +91,20 @@ public final class AppStore {
     /// A non-nil id that matches no session is ignored, leaving the current
     /// selection untouched; nil always deselects. Backs the sidebar's
     /// `List(selection:)` so a click persists immediately rather than waiting for
-    /// the next structural mutation.
+    /// the next structural mutation. Visiting a session clears its unseen badge and,
+    /// when its agent indicator is `autoReset`, resets the indicator to idle for good;
+    /// a non-`autoReset` indicator is left untouched (keep-state: hidden while viewed,
+    /// restored on switch-away).
     public func selectSession(_ sessionID: UUID?) {
         if let sessionID, session(withID: sessionID) == nil { return }
         selectedSessionID = sessionID
-        if let sessionID { clearUnseen(sessionID) }
+        if let sessionID {
+            clearUnseen(sessionID)
+            // reset the indicator on visit only when the caller marked it auto-reset (clear-on-visit).
+            if let session = session(withID: sessionID), session.agentIndicator.autoReset {
+                session.agentIndicator = AgentIndicator()
+            }
+        }
         recordRecency()
         save()
     }
@@ -104,6 +113,13 @@ public final class AppStore {
     /// Not persisted (the count is ephemeral), so it never triggers a `save()`.
     public func clearUnseen(_ sessionID: UUID) {
         session(withID: sessionID)?.unseenCount = 0
+    }
+
+    /// Sets a session's agent status indicator (the sidebar status glyph). The single mutation point
+    /// for the control channel's `session.status`. No-op for an unknown id. Not persisted (the
+    /// indicator is ephemeral), so it never triggers a `save()`.
+    public func setAgentIndicator(_ indicator: AgentIndicator, forSession id: UUID) {
+        session(withID: id)?.agentIndicator = indicator
     }
 
     /// Pushes the current selection to the front of the recency stack (the Ctrl-Tab order).

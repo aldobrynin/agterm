@@ -64,8 +64,8 @@ xcodebuild test -project agterm.xcodeproj -scheme agterm -destination 'platform=
 - A standard macOS menu bar mirrors the in-app actions with keyboard shortcuts: **File** — New Session (⌘N), New Workspace (⇧⌘N), Open Directory… (⌘O), Rename Session/Workspace, Delete Workspace, Close Session (⌘W, terminal-style: closes the active session); **View** — Split (⌘D), Quick Terminal (⌃`), the command palettes, Previous/Next Session (⌥⌘↑/⌥⌘↓), First/Last Session (menu and palette only, no hotkey), Increase/Decrease/Actual font size (⌘+/⌘−/⌘0).
 - Two fuzzy-search command palettes (type to filter, ↑/↓ to move, Enter to run, Esc to dismiss): the **session switcher** (⌃P) jumps between open sessions by name or working directory, and the **action palette** (⌃⇧P) runs any command (new/rename/close, delete workspace, split, quick terminal, font size, move session to a workspace, …). Results sort by match quality then alphabetically. Both are also in the View menu.
 - A Ctrl-Tab session switcher (macOS app-switcher style): hold Ctrl and tap Tab to walk a most-recently-used list of sessions across all workspaces (the previous session pre-selected on top, Ctrl+Shift+Tab reverses), then release Ctrl to switch. A quick tap of Ctrl+Tab flips straight to the previously visited session.
-- A Settings window (Cmd+,) with **General**, **Appearance**, and **Key Mapping** tabs (Key Mapping is a placeholder for now). **General** toggles macOS notification banners. **Appearance → Terminal** sets the terminal font family, default font size, and ghostty theme (any of the 512 bundled themes); **Appearance → Window** sets background opacity and blur (a translucent, optionally blurred window — the sidebar's Liquid Glass tints to match on macOS 26). Changes persist and apply live to open terminals. Applying a font/theme change resets per-session cmd-+/- zoom to the default.
-- Terminal desktop notifications: a program's OSC 9 / 777 notification from any session or pane surfaces as a macOS banner and an unseen-count badge on the sidebar row (rolled up onto a collapsed workspace row). Clicking the banner brings agterm forward and focuses the exact pane; focusing a session clears its badge and dismisses its delivered banners. A notification from the pane you're already focused on is suppressed. Banners can be turned off in General settings — the badge still tracks notifications either way.
+- A Settings window (Cmd+,) with **General**, **Appearance**, and **Key Mapping** tabs (Key Mapping is a placeholder for now). **General** toggles macOS notification banners and the sidebar notification count badges. **Appearance → Terminal** sets the terminal font family, default font size, and ghostty theme (any of the 512 bundled themes); **Appearance → Window** sets background opacity and blur (a translucent, optionally blurred window — the sidebar's Liquid Glass tints to match on macOS 26). Changes persist and apply live to open terminals. Applying a font/theme change resets per-session cmd-+/- zoom to the default.
+- Terminal desktop notifications: a program's OSC 9 / 777 notification from any session or pane surfaces as a macOS banner and an unseen-count badge on the sidebar row (rolled up onto a collapsed workspace row). Clicking the banner brings agterm forward and focuses the exact pane; focusing a session clears its badge and dismisses its delivered banners. A notification from the pane you're already focused on is suppressed. Banners can be turned off with the **Show notification banners** toggle in General settings; the red count badges can be hidden separately with **Show notification badges** — the count keeps tracking either way (it reappears with the current count when re-enabled), and the agent-status indicator is unaffected.
 - Named windows: a window is a top-level bundle of workspaces and sessions, each in its own on-screen macOS window. Keep a library of windows (for example "work" and "personal"), open one per on-screen window, and create, rename, or delete them from the **File** menu (New Window ⌥⌘N, Open Window ▸, Rename Window…, Delete Window) or the action palette. Each bundle shows in exactly one window. The set of windows open at quit reopens on the next launch, with their frames restored.
 - Auto-persist on every change and on quit; restore the tree, names, selection, each session's working directory and font size, the split state, and the status-bar visibility on the next launch.
 
@@ -161,6 +161,31 @@ agtermctl session new --window "$AGTERM_WINDOW_ID" --cwd .   # open a sibling se
 agtermctl session type --target "$AGTERM_SESSION_ID" $'\n'   # type into this very session
 agtermctl tree --socket "$AGTERM_SOCKET"                     # reach the same agterm this shell runs in
 ```
+
+## Agent status
+
+A coding agent running in a session can flag its status on that session's sidebar row, so you can tell at a glance which of many concurrent agents needs you. The status shows as a small tinted SF Symbol just left of the notification badge: `active` is a blue ellipsis, `blocked` an amber exclamation, `completed` a green check, and `idle` is nothing. The icon appears only on a session you are *not* looking at — it is hidden on the selected session of the frontmost window and re-appears when you switch away, so a status you're already watching doesn't clutter the row.
+
+An agent sets it over the control channel:
+
+```sh
+agtermctl session status active --target "$AGTERM_SESSION_ID"      # agent started working
+agtermctl session status blocked --target "$AGTERM_SESSION_ID"     # waiting on you
+agtermctl session status completed --auto-reset --target "$AGTERM_SESSION_ID"  # done; clears when seen
+agtermctl session status idle --target "$AGTERM_SESSION_ID"        # clear it
+```
+
+`<state>` is one of `idle | active | completed | blocked`. `--blink` pulses the icon for attention. `--auto-reset` makes the indicator clear back to idle the moment you visit (select) the session — used for a finished result you only need to notice once; without it the status is kept until something changes it. The target session can live in any window, frontmost or not.
+
+To wire this up automatically, **Help ▸ Install Agent Status Hooks…** installs a hooks package. It copies the scripts to `~/.config/agterm/agent-status/` (baking in the bundled `agtermctl`'s path so the hooks work even without the CLI on your PATH), adds a `source` line to `~/.zshrc` and `~/.bashrc` for the generic shell integration, and merges three Claude Code hooks into `~/.claude/settings.json` (backing up the prior file as `.bak`, or leaving it untouched and skipping the merge if it isn't valid JSON): a prompt sets `active`, the Stop event sets `completed --auto-reset`, and a permission prompt sets `blocked`. It is idempotent — re-running refreshes the baked path and is a clean no-op for entries already present.
+
+For Codex, the installer prints (it does not auto-edit TOML) a line to add to `~/.codex/config.toml` yourself:
+
+```toml
+notify = ["/Users/you/.config/agterm/agent-status/codex-notify.sh"]
+```
+
+A generic bash/zsh `shell/integration.sh` covers any agent launched as a shell command: it flags `active` while a command matching `AGTERM_AGENT_RE` runs and `idle` at the next prompt. The default regex matches `codex`, `gemini`, `cursor-agent`, `aider`, `opencode`, `crush`, and `goose`; Claude Code is excluded by default because its own hooks drive finer per-turn state, and Codex additionally has the richer `codex-notify.sh` chain above. Override `AGTERM_AGENT_RE` before sourcing to change the set. All hooks are no-ops outside an agterm session.
 
 ## Restore limitations
 
