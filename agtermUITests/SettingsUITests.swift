@@ -66,10 +66,13 @@ final class SettingsUITests: XCTestCase {
                       "turning compact toolbar on should persist compactToolbar=true")
     }
 
-    // NOTE: no UI test for the General → Scrolling stepper. A SwiftUI `Stepper` (→ NSStepper) does not
-    // expose a stable element for its accessibilityIdentifier to XCUITest (the id resolves transiently
-    // then vanishes at interaction time), the same reason the existing `settings-font-size` stepper has
-    // none. The value → `mouse-scroll-multiplier` config logic is covered host-free in AppSettingsTests.
+    func testScrollSpeedSliderPersists() throws {
+        let slider = settingsControl(tab: "General", control: "settings-scroll-speed")
+        slider.adjust(toNormalizedSliderPosition: 1.0) // drag to max (10), away from the default 3
+
+        XCTAssertTrue(poll { (self.settingsDouble("mouseScrollMultiplier") ?? 3) > 3 },
+                      "moving the scroll-speed slider should persist a >3 mouseScrollMultiplier to settings.json")
+    }
 
     // MARK: - Helpers
 

@@ -63,10 +63,14 @@ private struct GeneralSettingsView: View {
             }
 
             Section("Scrolling") {
-                Stepper(value: mouseScrollMultiplier, in: 1 ... 10, step: 1) {
-                    Text("Scroll speed: \(Int(model.settings.mouseScrollMultiplier ?? 3))x")
+                HStack {
+                    Text("Scroll speed")
+                    Slider(value: mouseScrollMultiplier, in: 1 ... 10, step: 1)
+                        .accessibilityIdentifier("settings-scroll-speed")
+                    Text("\(Int(model.settings.mouseScrollMultiplier ?? 3))x")
+                        .monospacedDigit()
+                        .frame(width: 42, alignment: .trailing)
                 }
-                .accessibilityIdentifier("settings-scroll-speed")
                 Text("Mouse-wheel and trackpad scroll-speed multiplier. Higher is faster; the default is 3.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
