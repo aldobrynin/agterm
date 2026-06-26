@@ -393,9 +393,10 @@ private struct WindowContentView: View {
                         TerminalView(session: session, surfaceKeyPath: \.surface, makeSurface: makeSurface,
                                      isActive: isActive && !session.splitFocused && !overlaid)
                             .overlay { paneDim(session.splitFocused) }
-                            // introspects the AppKit NSSplitView to persist/restore the divider ratio; a
-                            // background (not a third pane), unconditional so it never perturbs the split shape.
-                            .background { SplitRatioAccessor(session: session, onPersist: { store.save() }) }
+                            // introspects the AppKit NSSplitView to persist/restore the divider ratio AND to
+                            // clip its divider out of the titlebar strip (see SplitRatioAccessor); a background
+                            // (not a third pane), unconditional so it never perturbs the split shape.
+                            .background { SplitRatioAccessor(session: session, titlebarHeight: titlebarHeight, onPersist: { store.save() }) }
                             .id(session.id)
                         TerminalView(session: session, surfaceKeyPath: \.splitSurface, makeSurface: makeSplitSurface,
                                      isActive: isActive && session.splitFocused && !overlaid)
@@ -1279,29 +1280,49 @@ private final class WindowCloseDelegateProxy: NSObject, NSWindowDelegate {
     }
 }
 
-/// Bridges to the AppKit `NSSplitView` under SwiftUI's `HSplitView` to persist and restore the split
-/// divider ratio — no public SwiftUI API exposes the divider position. Attached as a `.background` on the
-/// primary pane so its `NSView` lives inside the split's view tree without becoming a third arranged pane.
-/// Once the split has a real width it restores `session.splitRatio` via `setPosition`; on each divider
+/// Bridges to the AppKit `NSSplitView` under SwiftUI's `HSplitView` to (1) persist and restore the split
+/// divider ratio — no public SwiftUI API exposes the divider position — and (2) clip the split's divider out
+/// of the titlebar strip. Attached as a `.background` on the primary pane so its `NSView` lives inside the
+/// split's view tree without becoming a third arranged pane.
+///
+/// (1) Once the split has a real width it restores `session.splitRatio` via `setPosition`; on each divider
 /// resize it writes the current left-pane fraction back to the session, which the next `save()` (or the
 /// quit-flush) persists, like a live cwd change.
+///
+/// (2) In COMPACT mode the SwiftUI `.padding(.top, titlebarHeight)` (30px) lands inside the window's
+/// safe-area band, so the AppKit `NSSplitView` ignores it and grows to the FULL window height (verified:
+/// its frame + both arranged panes span pt 0..windowHeight). The panes' top strip is empty terminal-bg
+/// (invisible against the window bg), but the divider draws BLACK through it — a streak up through the
+/// transparent titlebar. A 48px inset clears the band so normal mode is already bounded. The fix is a
+/// CALayer mask on the split that hides its top `titlebarHeight` strip: a layer mask clips without
+/// reflowing the terminal grid (a SwiftUI `.mask`/`.clipped()` here scrolled the top row away), the panes'
+/// empty top strip is harmless to clip, and it composes with translucency (it reveals the window backing,
+/// never an opaque color over the titlebar).
 private struct SplitRatioAccessor: NSViewRepresentable {
     let session: Session
+    let titlebarHeight: CGFloat
     let onPersist: () -> Void
 
     func makeNSView(context _: Context) -> SplitProbeView {
         let view = SplitProbeView(session: session)
         view.onPersist = onPersist
+        view.titlebarHeight = titlebarHeight
         return view
     }
-    func updateNSView(_ nsView: SplitProbeView, context _: Context) { nsView.onPersist = onPersist }
+    func updateNSView(_ nsView: SplitProbeView, context _: Context) {
+        nsView.onPersist = onPersist
+        nsView.titlebarHeight = titlebarHeight // re-clip on a compact-toolbar toggle (changes titlebarHeight)
+    }
 
     final class SplitProbeView: NSView {
         private let session: Session
         var onPersist: (() -> Void)?
+        /// Top strip (in points) to clip the split's divider out of; updated on a compact-toolbar toggle.
+        var titlebarHeight: CGFloat = 0 { didSet { if titlebarHeight != oldValue { updateDividerClip() } } }
         nonisolated(unsafe) private var resizeObserver: NSObjectProtocol?
         nonisolated(unsafe) private var saveWorkItem: DispatchWorkItem?
         private weak var splitView: NSSplitView?
+        private var dividerClipMask: CALayer?
         private var restored = false
 
         init(session: Session) {
@@ -1315,6 +1336,7 @@ private struct SplitRatioAccessor: NSViewRepresentable {
         override func layout() {
             super.layout()
             attachIfNeeded()
+            updateDividerClip() // keep the titlebar-strip clip sized to the current split bounds
             guard !restored, let split = splitView else { return }
             if let ratio = session.splitRatio {
                 let total = split.bounds.width
@@ -1334,6 +1356,43 @@ private struct SplitRatioAccessor: NSViewRepresentable {
                 // `capture()`, matching the codebase's notification-closure pattern (e.g. ControlServer).
                 MainActor.assumeIsolated { self?.capture() }
             }
+        }
+
+        /// Mask the split's divider out of the titlebar zone — the strip ABOVE the window's titlebar boundary
+        /// (`titlebarHeight` points from the content top) that the NSSplitView overruns into in compact mode.
+        /// The clip amount is the split's overrun ABOVE that boundary, computed live: ~`titlebarHeight` in
+        /// compact (the split spans the full window) and 0 in normal (the split is already bounded at the
+        /// content top, so clipping a fixed strip would eat real terminal rows). A layer mask, not a frame
+        /// change, so the panes never reflow.
+        private func updateDividerClip() {
+            guard let split = splitView, let contentH = split.window?.contentView?.bounds.height else { return }
+            split.wantsLayer = true
+            // split's top edge measured in points DOWN from the content top (window base coords, AppKit
+            // origin bottom-left, so the top edge is maxY); then how far it rises above the titlebar boundary.
+            let splitTopFromContentTop = contentH - split.convert(split.bounds, to: nil).maxY
+            let overrun = max(0, titlebarHeight - splitTopFromContentTop)
+            // no overrun (normal mode, or any state where the split is already bounded at the content top) →
+            // no clip: drop the mask so the split composites untouched, like a single pane.
+            guard overrun > 0 else {
+                if dividerClipMask != nil { split.layer?.mask = nil; dividerClipMask = nil }
+                return
+            }
+            let visibleHeight = max(0, split.bounds.height - overrun)
+            // the mask's OPAQUE rect = the region that stays visible (everything below the overrun strip).
+            // the strip sits at the view's TOP: high-y when not flipped, low-y (origin) when flipped.
+            let originY = split.isFlipped ? overrun : 0
+            let frame = CGRect(x: 0, y: originY, width: split.bounds.width, height: visibleHeight)
+            let mask = dividerClipMask ?? CALayer()
+            mask.backgroundColor = NSColor.black.cgColor // opaque -> the masked layer shows through here
+            // no implicit fade as the mask resizes during a window/divider drag
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            mask.frame = frame
+            CATransaction.commit()
+            if dividerClipMask == nil {
+                dividerClipMask = mask
+            }
+            split.layer?.mask = mask // re-assert (SwiftUI may rebuild the split's layer)
         }
 
         /// Record the current left-pane fraction onto the session, skipping no-op and degenerate values so a
