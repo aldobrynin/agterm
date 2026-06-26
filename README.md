@@ -289,6 +289,10 @@ notify = ["/Users/you/.config/agterm/agent-status/codex-notify.sh"]
 
 A generic bash/zsh `shell/integration.sh` covers any agent launched as a shell command: it flags `active` while a command matching `AGTERM_AGENT_RE` runs and `idle` at the next prompt. The default regex matches `codex`, `gemini`, `cursor-agent`, `aider`, `opencode`, `crush`, and `goose`; Claude Code is excluded by default because its own hooks drive finer per-turn state, and Codex additionally has the richer `codex-notify.sh` chain above. Override `AGTERM_AGENT_RE` before sourcing to change the set. All hooks are no-ops outside an agterm session.
 
+## Troubleshooting
+
+Where the logs and config live, how to read them, and the common problems (a keymap editor that will not open, a custom action that does nothing, missing notifications) are covered in [docs/troubleshooting.md](docs/troubleshooting.md). For a bug, open an [issue](https://github.com/umputun/agterm/issues/new); for a feature request or question, start a [Discussion](https://github.com/umputun/agterm/discussions/new).
+
 ## Restore limitations
 
 Restore reconstructs the structure, not the running processes. Three limitations follow from the design:

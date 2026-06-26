@@ -1,0 +1,98 @@
+<!-- agterm-skill -->
+
+# Troubleshooting agterm and reporting problems
+
+Two jobs: (1) diagnose a problem from inside an agterm session, (2) help the user file it on the repo
+as a bug (issue) or a feature/question (Discussion) — safely, never posting without approval.
+
+The full user-facing version of the diagnostics below is the repo's `docs/troubleshooting.md`.
+
+## Diagnosing from inside a session
+
+You are inside agterm (`AGTERM_ENABLED=1`). Use:
+
+- **Live state** — `agtermctl tree --json`, `agtermctl window list --json`.
+- **Keymap problems** — `agtermctl keymap reload` prints the parse-diagnostic count (`0` = clean). A
+  non-zero count means `keymap.conf` has problems; the user sees the list in Settings ▸ Key Mapping.
+- **Logs** (unified logging, subsystem `com.umputun.agterm`):
+  ```bash
+  log show --predicate 'subsystem == "com.umputun.agterm"' --info --last 30m
+  ```
+  Categories: `CustomCommandRunner`, `SettingsModel`, `GhosttyApp`, `NotificationManager`, `ControlServer`.
+- **Files** — keymap `~/.config/agterm/keymap.conf`; settings
+  `~/Library/Application Support/agterm/settings.json`; socket path in `$AGTERM_SOCKET`.
+
+### "Keymap editor won't open"
+
+Edit Keymap runs `$VISUAL`/`$EDITOR` (else `vi`) in an overlay via the login shell. The most common
+cause is a **GUI editor launched without a blocking flag** (`code`, `subl`, `zed`, `mate`, `cursor`):
+it returns immediately, so the overlay flashes shut. Fix: `export EDITOR='code -w'` (the editor's wait
+flag) in the shell rc. It also no-ops with no session selected or an overlay already open.
+
+### "Custom action does nothing"
+
+Causes, in order: a parse error (see the diagnostics); the chord conflicts with a built-in or another
+custom command and was dropped to palette-only (it still runs from `⌃⇧P`, tagged `custom`); a reserved
+chord (`ctrl+tab`, `ctrl+1`/`ctrl+2`); a modifier-less key (rejected — a custom chord needs a
+modifier); it only fires while a terminal pane has keyboard focus; it runs in a non-interactive
+`/bin/sh -c` (no aliases/functions, a smaller `PATH` — use absolute paths or `$SHELL -lc '…'`); a
+non-zero exit posts a failure banner (meaning it DID fire and failed). Reload after edits:
+`agtermctl keymap reload`.
+
+## Reporting: decide bug vs unsupported FIRST
+
+- A **supported** thing misbehaves (a documented command/feature does the wrong thing, a crash, a parse
+  bug) → a GitHub **issue**.
+- The user wants something **not supported**, or it is a question / idea / "can it do X" → a GitHub
+  **Discussion** (category `Ideas` for a feature request, `Q&A` for a question). Do NOT file a feature
+  request as a bug.
+
+## Hard rules for filing
+
+1. **Never run any `gh` command without the user's explicit approval in this conversation.** Drafting
+   is fine; posting needs a clear go-ahead ("post it").
+2. **Check tooling first** — `gh auth status`. If `gh` is missing or not logged in, do NOT install or
+   authenticate it. Give the user the prefilled content plus the URL to paste it into:
+   - issue: <https://github.com/umputun/agterm/issues/new>
+   - discussion: <https://github.com/umputun/agterm/discussions/new>
+3. **Draft first.** Show the user the full title and body, and get explicit approval before any `gh`.
+4. **Scrub sensitive content** before showing or posting: API tokens/keys, passwords, internal
+   hostnames/IPs, usernames embedded in absolute paths (replace with `~` or `<user>`), private repo
+   names, and the contents of a selection / `session.copy` / clipboard. When unsure, ask.
+5. **Gather the repro facts yourself** where you can: agterm version (the user reads it from
+   agterm ▸ About agterm), `agtermctl tree --json` shape, a scrubbed `keymap.conf` excerpt, a scrubbed
+   `log show` excerpt.
+
+## Issue template (bug)
+
+```
+Title: <short, specific>
+
+What happened: <one or two sentences>
+Expected vs actual: <…>
+Steps to reproduce:
+1. …
+2. …
+Environment: agterm <version>, macOS <version>
+Logs: <scrubbed `log show --predicate 'subsystem == "com.umputun.agterm"'` excerpt>
+Config: <scrubbed keymap.conf lines, if keymap-related>
+```
+
+File it (only after approval) with `--body-file -` so a multi-line body is not mangled by quoting:
+
+```bash
+gh issue create -R umputun/agterm --title "<title>" --body-file - <<'EOF'
+<body>
+EOF
+```
+
+## Discussion (feature request / question)
+
+```bash
+gh discussion create -R umputun/agterm --category "Ideas" --title "<title>" --body-file - <<'EOF'
+<body>
+EOF
+```
+
+Use `--category "Ideas"` for a feature request, `"Q&A"` for a question. Same draft-first, scrub, and
+explicit-approval rules apply.

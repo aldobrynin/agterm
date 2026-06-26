@@ -8,14 +8,18 @@ description: >
   an image inline via a bundled helper script; type
   into a session, copy its selection, or search its scrollback; post desktop notifications; manage windows (new, list,
   select, close, resize, move); change font size; or reload and edit the keymap. Also covers the
-  window/workspace/session addressing model and the AGTERM_* environment a spawned shell sees.
+  window/workspace/session addressing model and the AGTERM_* environment a spawned shell sees, plus
+  diagnosing problems (keymap editor, custom actions, logs) and filing a bug as a GitHub issue or a
+  feature request / question as a GitHub Discussion.
 when_to_use: >
   Trigger on: agterm, agtermctl, agterm control socket, session.new, session.close, session.type,
   session.split, session.scratch, session.focus, session.go, session.copy, session.search, session.status,
   session.flag, session.overlay, workspace.new, workspace.select, workspace.move, workspace.focus, window.new, window.list,
   window.select, window.resize, window.move, quick terminal, sidebar, sidebar.mode, sidebar.expand, sidebar.collapse, flagged, notify, font.inc, keymap.reload,
   theme.set, theme.list, select theme, edit keymap, show an image, display an image inline, show-image,
-  AGTERM_SESSION_ID, AGTERM_SOCKET, and asks to drive or script agterm.
+  AGTERM_SESSION_ID, AGTERM_SOCKET, and asks to drive or script agterm. Also: troubleshoot agterm,
+  keymap editor won't open, custom action / custom command not working, agterm logs, file an agterm
+  bug, report an agterm issue, open an agterm discussion / feature request.
 user-invocable: false
 allowed-tools: Bash(agtermctl *)
 ---
@@ -148,6 +152,22 @@ Do NOT print graphics escapes to your own tool stdout (the agent harness escapes
 and do NOT run an image viewer in your tool shell (no controlling terminal). The overlay is what makes
 it render. Outside agterm (`AGTERM_ENABLED` unset) there is no overlay — fall back to `open <image>`.
 
+## Troubleshooting and reporting
+
+When the user hits a problem (a keymap editor that will not open, a custom action that does nothing,
+notifications missing), diagnose it from inside the session first: inspect `agtermctl tree --json`,
+run `agtermctl keymap reload` for the parse-diagnostic count, and read the unified logs under
+subsystem `com.umputun.agterm`. If it turns out to be a bug, offer to help file it.
+
+**Filing is opt-in and draft-first.** Never run a `gh` command without the user's explicit approval.
+Decide first whether it is a bug (a supported feature misbehaving → a GitHub **issue**) or something
+not supported / a question / an idea (→ a GitHub **Discussion**, category `Ideas` or `Q&A`). Draft the
+title and body, show it to the user, scrub anything private (tokens, hostnames, usernames in paths,
+selection/clipboard text), and only post after an explicit go-ahead. If `gh` is missing or not
+authenticated, hand the user the prefilled text plus the new-issue / new-discussion URL instead.
+
+Full detail, templates, and the exact `gh` commands are in **troubleshooting.md**.
+
 ## Reference files
 
 - **reference.md** — full per-command detail: every flag, the JSON return shapes
@@ -155,6 +175,8 @@ it render. Outside agterm (`AGTERM_ENABLED` unset) there is no overlay — fall 
   lifecycle, and the keymap.conf format (`map` / `command`, chords, leaders, `{AGT_X}` tokens).
 - **examples.md** — copy-paste agtermctl recipes for common tasks (build a layout, run a program in a
   blocking overlay and read its status, type into a fresh session, notify, inspect the tree).
+- **troubleshooting.md** — diagnosing common problems (keymap editor, custom actions, logs) and the
+  bug-issue / feature-Discussion reporting workflow (draft-first, scrub, never post without approval).
 - **scripts/show-image.sh** — bundled helper that displays an image inline in an overlay (see above).
 
 Read those files when you need exact flags, return shapes, or worked examples.
