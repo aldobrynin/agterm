@@ -67,11 +67,15 @@ final class SettingsModel {
         applyInactivePaneMute()
         applySidebarBackgroundShift()
         applyAgentStatusColors()
+        applyRestoreRunningCommand()
         // create the commented starter keymap on first launch, then load + parse it.
         ensureStarterKeymap()
         loadKeymap()
         // create the commented starter ghostty.conf on first launch (all comments, a no-op until edited).
         ensureStarterGhosttyConfig()
+        // seed the restore-denylist.conf (multiplexers) on first launch, then parse it into GhosttyApp.
+        ensureStarterRestoreDenylist()
+        loadRestoreDenylist()
     }
 
     func setFontFamily(_ value: String?) { settings.fontFamily = value; persistAndApply() }
@@ -83,6 +87,8 @@ final class SettingsModel {
     func setMouseScrollMultiplier(_ value: Double?) { settings.mouseScrollMultiplier = value; persistAndApply() }
     func setInactivePaneMuteStrength(_ value: Int?) { settings.inactivePaneMuteStrength = value; persistAndApply() }
     func setSidebarBackgroundShift(_ value: Int?) { settings.sidebarBackgroundShift = value; persistAndApply() }
+    // not a ghostty key, so persistAndApply()'s writeGhosttyConfig() no-ops and no surface reload fires.
+    func setRestoreRunningCommand(_ value: Bool?) { settings.restoreRunningCommand = value; persistAndApply() }
     func setActiveStatusColorHex(_ hex: String?) { settings.activeStatusColorHex = hex; persistAndApply() }
     func setBlockedStatusColorHex(_ hex: String?) { settings.blockedStatusColorHex = hex; persistAndApply() }
     func setCompletedStatusColorHex(_ hex: String?) { settings.completedStatusColorHex = hex; persistAndApply() }
@@ -219,6 +225,55 @@ final class SettingsModel {
 
     /// The resolved `ghostty.conf` path, exposed for the Edit ghostty.conf action (the overlay command).
     var ghosttyConfigPath: String { ghosttyConfigURL().path }
+
+    /// The resolved restore-denylist path: `<config dir>/restore-denylist.conf`.
+    private func restoreDenylistURL() -> URL {
+        ConfigPaths.restoreDenylistPath(configDirectory: configDirectoryURL())
+    }
+
+    /// Read + parse `restore-denylist.conf` and mirror it into `GhosttyApp.shared.restoreDenylist` (the
+    /// set the restore factories consult). A missing/unreadable file yields an empty denylist (restore
+    /// everything). Read at launch; an edit takes effect on the next launch (restore is launch-time).
+    private func loadRestoreDenylist() {
+        let text = (try? String(contentsOf: restoreDenylistURL(), encoding: .utf8)) ?? ""
+        GhosttyApp.shared.setRestoreDenylist(CommandRestore.parseDenylist(text))
+    }
+
+    /// On first launch, if `restore-denylist.conf` does not exist, create the config directory and write
+    /// a commented starter listing the terminal multiplexers (the one class of program that just starts a
+    /// fresh empty session on re-run). Never overwrites an existing file.
+    private func ensureStarterRestoreDenylist() {
+        let url = restoreDenylistURL()
+        if FileManager.default.fileExists(atPath: url.path) { return }
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            try starterRestoreDenylistText().write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            logger.notice("could not write starter restore-denylist at \(url.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// The commented starter `restore-denylist.conf`: a header explaining the format, the terminal
+    /// multiplexers as active default entries, and commented examples the user can uncomment.
+    private func starterRestoreDenylistText() -> String {
+        """
+        # restore-denylist.conf — programs NOT to re-run when "Restore running commands on restart"
+        # is on. One command name per line, matched on the command's basename. Blank lines and lines
+        # starting with # are ignored. Read at launch; edits take effect on the next launch.
+        #
+        # Terminal multiplexers just start a fresh, empty session when re-run (your old session is gone),
+        # so they are listed by default — delete a line to let it restore:
+        tmux
+        screen
+        zellij
+        #
+        # Add anything else you would rather start fresh, e.g. an editor or pager:
+        # vim
+        # less
+
+        """
+    }
 
     /// Rebuild the ghostty config from all sources (re-reading the agterm-scoped `ghostty.conf` the user
     /// just edited) and broadcast it to every live surface, clearing per-session font overrides like a
@@ -423,6 +478,7 @@ final class SettingsModel {
         applyInactivePaneMute()
         applySidebarBackgroundShift()
         applyAgentStatusColors()
+        applyRestoreRunningCommand()
         // refresh the app chrome (title bar + sidebar + quick terminal) with the new terminal color,
         // window translucency, and toolbar style immediately, rather than only when the window next
         // re-keys. The title-bar re-sync and the cwd-subtitle drop both ride this notification.
@@ -445,6 +501,10 @@ final class SettingsModel {
 
     private func applyNotificationBadgeEnabled() {
         GhosttyApp.shared.setNotificationBadgeEnabled(settings.notificationBadgeEnabled ?? true)
+    }
+
+    private func applyRestoreRunningCommand() {
+        GhosttyApp.shared.setRestoreRunningCommand(settings.restoreRunningCommand ?? false)
     }
 
     private func applyInactivePaneMute() {
