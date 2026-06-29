@@ -93,6 +93,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: agterm/agterm.entitlements
         MARKETING_VERSION: "0.0.0"
         CURRENT_PROJECT_VERSION: "0.0.0"
+        GIT_COMMIT: ""
         ENABLE_HARDENED_RUNTIME: YES
         OTHER_LDFLAGS:
           - "-lc++"

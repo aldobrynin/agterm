@@ -186,6 +186,11 @@ struct agtermApp: App {
         .defaultSize(width: 900, height: 600)
         .windowResizability(.contentMinSize)
         .commands {
+            // App menu: replace the default "About agterm" with one that opens the standard
+            // panel enriched with a clickable repo link and, on release builds, the build commit.
+            CommandGroup(replacing: .appInfo) {
+                Button("About agterm") { showAboutPanel() }
+            }
             // File: replace the default "New" group with all of agterm's creation/management actions,
             // grouped by entity into three sections — Window, then Workspace, then Session. The
             // system Close / Close All commands stay below in their own group.
@@ -409,6 +414,24 @@ struct agtermApp: App {
         Settings {
             SettingsView(model: settingsModel)
         }
+    }
+
+    /// Opens the standard About panel, enriched with a clickable repository link and — on release
+    /// builds, where `GIT_COMMIT` is baked into the bundle — the short build commit shown in the
+    /// version's parenthetical. Dev builds (no baked commit) fall back to the plain version.
+    private func showAboutPanel() {
+        var options: [NSApplication.AboutPanelOptionKey: Any] = [:]
+        let repo = "https://github.com/umputun/agterm"
+        if let url = URL(string: repo) {
+            options[.credits] = NSAttributedString(string: repo, attributes: [
+                .link: url,
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+            ])
+        }
+        if let commit = Bundle.main.infoDictionary?["GitCommit"] as? String, !commit.isEmpty, commit != "unknown" {
+            options[.version] = commit
+        }
+        NSApplication.shared.orderFrontStandardAboutPanel(options: options)
     }
 
     /// Builds the app-global window library rooted at the state directory. The library's bootstrap
