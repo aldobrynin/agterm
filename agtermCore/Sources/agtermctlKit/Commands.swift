@@ -504,8 +504,8 @@ struct Session: ParsableCommand {
     struct Background: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "background",
-            abstract: "Set or clear a session's background watermark (image or rasterized text).",
-            subcommands: [Image.self, Text.self, Clear.self]
+            abstract: "Set or clear a session's background (image, rasterized text, or solid color).",
+            subcommands: [Image.self, Text.self, Color.self, Clear.self]
         )
 
         /// Shared input validation against the host-free `WatermarkConfig`, so a bad value is a clean
@@ -574,8 +574,23 @@ struct Session: ParsableCommand {
             }
         }
 
+        struct Color: RequestCommand {
+            static let configuration = CommandConfiguration(
+                abstract: "Set a solid background color for the terminal (honors the Settings window translucency).")
+            @Argument(help: "Background color as #rrggbb.") var color: String
+            @OptionGroup var target: TargetOptions
+            @OptionGroup var options: ClientOptions
+
+            func validate() throws { try Background.validate(color: color) }
+
+            func makeRequest() throws -> ControlRequest {
+                ControlRequest(cmd: .sessionBackground, target: target.target,
+                               args: options.withWindow(ControlArgs(mode: "color", color: color)))
+            }
+        }
+
         struct Clear: RequestCommand {
-            static let configuration = CommandConfiguration(abstract: "Remove the session's background watermark.")
+            static let configuration = CommandConfiguration(abstract: "Remove the session's background (watermark or solid color).")
             @OptionGroup var target: TargetOptions
             @OptionGroup var options: ClientOptions
 
