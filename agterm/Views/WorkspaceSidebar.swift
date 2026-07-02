@@ -4,220 +4,11 @@ import SwiftUI
 
 /// Custom pasteboard type carrying a dragged session's UUID string. Local-only
 /// drags (within the outline) use this to identify the session being moved.
-private let sessionPasteboardType = NSPasteboard.PasteboardType("com.umputun.agterm.session")
+let sessionPasteboardType = NSPasteboard.PasteboardType("com.umputun.agterm.session")
 
 /// Custom pasteboard type carrying a dragged workspace's UUID string. Local-only
 /// drags (within the outline) use this to identify the workspace being reordered.
-private let workspacePasteboardType = NSPasteboard.PasteboardType("com.umputun.agterm.workspace")
-
-/// An `NSTableCellView` with a leading icon, the name field, and a trailing badge.
-/// The icon is the inherited `cell.imageView` (a 2x2 grid glyph for a workspace, an outlined
-/// terminal for a session), so AppKit re-tints it white on a selected row. The name field is `cell.textField`
-/// (rename and selection wiring operate on it).
-private final class SidebarCellView: NSTableCellView {
-    /// Trailing unseen-notification count for the row (a session's `unseenCount`, or a collapsed
-    /// workspace's roll-up), drawn as a small accent capsule. Hidden when 0.
-    let badge = BadgeView()
-
-    /// Agent-status glyph drawn just left of the count badge, fed from the session's `agentIndicator`.
-    /// Hidden on `.idle` (workspace rows always idle for now).
-    let statusIcon = StatusIconView()
-
-    /// Color the row text/icon from the terminal theme: a selected row pairs with the selection
-    /// foreground (over the selection-background pill the row draws), or white over the soft wash when
-    /// the theme exposes no selection color; an unselected row uses the theme foreground, icons dimmed.
-    /// Driven by the coordinator from the real selection state (not `backgroundStyle`, which AppKit only
-    /// flips while the table is first responder).
-    func setColors(selected: Bool) {
-        let app = GhosttyApp.shared
-        let color = selected
-            ? (app.terminalSelectionForegroundColor ?? .white)
-            : (app.terminalForegroundColor ?? .labelColor)
-        textField?.textColor = color
-        imageView?.contentTintColor = color.withAlphaComponent(selected ? 0.85 : 0.6)
-    }
-}
-
-/// A small filled accent capsule showing an unseen-notification count, custom-drawn (not an
-/// `NSTextField`) so the capsule and text center cleanly at row size. A single digit reads as a
-/// circle (min width = height). Exposed to accessibility as a `notify-badge` static text.
-private final class BadgeView: NSView {
-    /// The count to show, capped at `99+`. Drives `intrinsicContentSize` and redraw.
-    var count = 0 {
-        didSet {
-            guard count != oldValue else { return }
-            invalidateIntrinsicContentSize()
-            needsDisplay = true
-            setAccessibilityValue(label)
-        }
-    }
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        setAccessibilityElement(true)
-        setAccessibilityRole(.staticText)
-        setAccessibilityIdentifier("notify-badge")
-    }
-
-    @available(*, unavailable)
-    required init?(coder _: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    private static let font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .bold)
-    // empty space reserved at the badge's LEADING edge, present only when the badge is shown, so the
-    // capsule keeps air from the status glyph to its left — while a count-0 badge collapses fully and
-    // lets that glyph sit flush at the trailing margin.
-    private static let leadingGap: CGFloat = 4
-    private var textAttributes: [NSAttributedString.Key: Any] { [.font: Self.font, .foregroundColor: NSColor.white] }
-    private var label: String { count > 99 ? "99+" : String(count) }
-
-    override var intrinsicContentSize: NSSize {
-        let height: CGFloat = 16
-        // collapse to zero width when there's nothing to show: `isHidden` alone does NOT collapse a
-        // view in Auto Layout, so a count-0 badge would otherwise reserve a trailing slot and push the
-        // status glyph in from the right edge. zero width lets the name reclaim it and the glyph sit flush.
-        guard count > 0 else { return NSSize(width: 0, height: height) }
-        let capsule = max((label as NSString).size(withAttributes: textAttributes).width + 9, height)
-        return NSSize(width: capsule + Self.leadingGap, height: height)
-    }
-
-    override func draw(_: NSRect) {
-        // the capsule occupies bounds minus the reserved leading gap; the status glyph to its left keeps air
-        let capsule = NSRect(x: Self.leadingGap, y: 0, width: bounds.width - Self.leadingGap, height: bounds.height)
-        let radius = capsule.height / 2
-        // systemRed (the conventional unread/notification color) reads on both the dark rows and the
-        // accent-colored selected row — an accent capsule would blend into a selected row.
-        NSColor.systemRed.setFill()
-        NSBezierPath(roundedRect: capsule, xRadius: radius, yRadius: radius).fill()
-        let text = label as NSString
-        let size = text.size(withAttributes: textAttributes)
-        let origin = NSPoint(x: capsule.minX + (capsule.width - size.width) / 2, y: (capsule.height - size.height) / 2)
-        text.draw(at: origin, withAttributes: textAttributes)
-    }
-}
-
-/// A small SF-Symbol agent-status glyph drawn just left of the count badge: `active` is a blue
-/// ellipsis, `blocked` an amber exclamation, `completed` a green check (all `.circle.fill` for a
-/// consistent silhouette). Hidden on `.idle`. Exposed to accessibility as an `agent-status` static
-/// text whose value is the state name (so XCUITest matches `app.staticTexts["agent-status"]`). Blink
-/// is a layer `opacity` `CABasicAnimation` (autoreverse/repeat), added only while visible AND blinking.
-private final class StatusIconView: NSImageView {
-    private static let blinkKey = "agent-status-blink"
-    private static let glyphWidth: CGFloat = 16
-
-    /// The view's width, collapsed to 0 on `.idle` so a status-less row reclaims the slot (and its
-    /// label truncates full-width); `glyphWidth` when a glyph shows. Activated in init, toggled in `apply`.
-    private lazy var widthConstraint = widthAnchor.constraint(equalToConstant: 0)
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        imageScaling = .scaleProportionallyUpOrDown
-        setAccessibilityElement(true)
-        setAccessibilityRole(.staticText)
-        setAccessibilityIdentifier("agent-status")
-        widthConstraint.isActive = true
-    }
-
-    @available(*, unavailable)
-    required init?(coder _: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// apply renders the indicator's tinted glyph (hiding the view and stopping any blink on `.idle`),
-    /// updates the accessibility value to the state name, and starts/stops the blink animation.
-    func apply(_ indicator: AgentIndicator) {
-        guard indicator.status != .idle else {
-            isHidden = true
-            image = nil
-            widthConstraint.constant = 0 // collapse the slot so the name reads full-width
-            setAccessibilityValue(AgentStatus.idle.rawValue)
-            stopBlink()
-            return
-        }
-        isHidden = false
-        image = Self.icon(for: indicator.status)
-        widthConstraint.constant = Self.glyphWidth
-        setAccessibilityValue(indicator.status.rawValue)
-        if indicator.blink { startBlink() } else { stopBlink() }
-    }
-
-    private func startBlink() {
-        guard layer?.animation(forKey: Self.blinkKey) == nil else { return }
-        let blink = CABasicAnimation(keyPath: "opacity")
-        blink.fromValue = 1.0
-        blink.toValue = 0.2
-        blink.duration = 0.5
-        blink.autoreverses = true
-        blink.repeatCount = .greatestFiniteMagnitude
-        layer?.add(blink, forKey: Self.blinkKey)
-    }
-
-    private func stopBlink() {
-        layer?.removeAnimation(forKey: Self.blinkKey)
-    }
-
-    private static func icon(for status: AgentStatus) -> NSImage? {
-        guard status != .idle else { return nil } // unreachable: `apply` returns early on `.idle` before drawing
-        // symbol + color come from the shared mapping (AgentStatus.symbolName + GhosttyApp.statusColor)
-        // so this glyph and the SwiftUI StatusGlyph stay identical.
-        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
-            .applying(NSImage.SymbolConfiguration(paletteColors: [GhosttyApp.shared.statusColor(for: status)]))
-        return NSImage(systemSymbolName: status.symbolName, accessibilityDescription: status.rawValue)?
-            .withSymbolConfiguration(config)
-    }
-}
-
-/// Row view that draws its own selection pill in `drawBackground`, so the selection is the terminal's
-/// `selection-background` color in every state. The table's `selectionHighlightStyle` is `.none` (set
-/// in `makeNSView`), so AppKit draws nothing of its own — otherwise it paints a gray unemphasized fill
-/// whenever the sidebar isn't first responder (the normal case, since focus lives in the terminal),
-/// which would override a custom `drawSelection`. `isEmphasized` is overridden so the row redraws when
-/// the window's key state changes (the brightness dims for a background window).
-private final class SidebarRowView: NSTableRowView {
-    /// White-wash fallback opacity (themes with no selection color): brighter for the key window,
-    /// dimmer for a background one.
-    private static let keyAlpha: CGFloat = 0.13
-    private static let inactiveAlpha: CGFloat = 0.07
-
-    override var isEmphasized: Bool {
-        get { window?.isKeyWindow ?? false }
-        // isEmphasized is derived from the window's key state; the setter only triggers a redraw.
-        // swiftlint:disable:next unused_setter_value
-        set { needsDisplay = true }
-    }
-
-    override func drawBackground(in dirtyRect: NSRect) {
-        super.drawBackground(in: dirtyRect)
-        guard isSelected else { return }
-        if let selection = GhosttyApp.shared.terminalSelectionBackgroundColor {
-            // the terminal's own selection color; dim it for a background (non-key) window.
-            selection.withAlphaComponent(isEmphasized ? 1 : 0.55).setFill()
-        } else {
-            // no theme selection color: a soft white wash, brighter for the key window.
-            NSColor(white: 1, alpha: isEmphasized ? Self.keyAlpha : Self.inactiveAlpha).setFill()
-        }
-        NSBezierPath(roundedRect: bounds.insetBy(dx: 8, dy: 1.5), xRadius: 7, yRadius: 7).fill()
-    }
-}
-
-/// A stable reference-type node fed to `NSOutlineView`. NSOutlineView keys item
-/// identity and expansion state by object identity (`===`), so the nodes must be
-/// the SAME instances across reloads — never freshly-allocated structs. The
-/// coordinator caches one node per workspace/session id and reuses it, rebuilding
-/// only the child lists from the store on each reload.
-private final class SidebarNode {
-    enum Kind { case workspace, session }
-
-    let kind: Kind
-    let id: UUID
-    /// Workspace child nodes, repopulated from the store on each rebuild. Empty
-    /// for session nodes.
-    var children: [SidebarNode] = []
-
-    init(kind: Kind, id: UUID) {
-        self.kind = kind
-        self.id = id
-    }
-}
+let workspacePasteboardType = NSPasteboard.PasteboardType("com.umputun.agterm.workspace")
 
 /// AppKit `NSOutlineView` sidebar (source-list style) hosted in SwiftUI via
 /// `NSViewRepresentable`. Replaces the SwiftUI `List` sidebar so cross-workspace
@@ -265,6 +56,7 @@ struct WorkspaceSidebar: NSViewRepresentable {
         outline.setDraggingSourceOperationMask([], forLocal: false)
 
         context.coordinator.outlineView = outline
+        context.coordinator.renameController.outlineView = outline
         context.coordinator.rebuildAndReload()
         context.coordinator.expandAll()
         context.coordinator.syncSelection()
@@ -312,9 +104,10 @@ struct WorkspaceSidebar: NSViewRepresentable {
     /// AppKit delegate callbacks (all main-thread) satisfy the store's main-actor
     /// isolation under strict concurrency.
     @MainActor
-    final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSTextFieldDelegate {
-        private let store: AppStore
-        private let actions: AppActions
+    final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
+        let store: AppStore
+        let actions: AppActions
+        let renameController: SidebarRenameController
         weak var outlineView: NSOutlineView?
 
         /// Root workspace nodes in store order. Rebuilt (in place, reusing cached
@@ -322,21 +115,6 @@ struct WorkspaceSidebar: NSViewRepresentable {
         private var roots: [SidebarNode] = []
         /// Cache of node instances keyed by id, so identity is stable across reloads.
         private var nodeCache: [UUID: SidebarNode] = [:]
-        /// Set while an end-editing notification is being processed, to ignore the
-        /// re-entrant end-editing the cancel/commit path can trigger.
-        private var committing = false
-        /// Set while a rename field is the active first responder (between
-        /// `beginEditing` and `restore`), so a badge tick can't reload the row out
-        /// from under the in-progress edit. `committing` covers only the end-editing
-        /// instant; this covers the whole typing window.
-        private var editing = false
-        /// Set by the Esc handler (`doCommandBy` cancelOperation) so the end-editing that the
-        /// manual resign triggers is treated as a cancel — the typed value is discarded.
-        private var cancellingRename = false
-        /// The row's pre-edit label, captured in `beginEditing` so an Esc-cancel can restore the
-        /// displayed text (a manual resign keeps the edited stringValue, and a cancel makes no model
-        /// change so no reload refreshes the row).
-        private var renameOriginalValue: String?
         /// Guards `syncSelection` against the selection-change delegate callback it
         /// itself triggers (which would otherwise re-enter the store).
         private var applyingSelection = false
@@ -379,7 +157,9 @@ struct WorkspaceSidebar: NSViewRepresentable {
         init(store: AppStore, actions: AppActions) {
             self.store = store
             self.actions = actions
+            self.renameController = SidebarRenameController(store: store)
             super.init()
+            renameController.onRenameEnded = { [weak self] in self?.focusActiveTerminal() }
             // the menu/palette can't reach the inline editor directly, so they post a
             // notification and this coordinator starts the edit on the selected row.
             NotificationCenter.default.addObserver(self, selector: #selector(beginRenameSessionNotified),
@@ -440,12 +220,12 @@ struct WorkspaceSidebar: NSViewRepresentable {
         @objc private func beginRenameSessionNotified() {
             guard let id = store.selectedSessionID, let node = nodeCache[id] else { return }
             // async so the edit starts after any palette overlay closes and the row is on screen.
-            DispatchQueue.main.async { [weak self] in self?.beginEditing(node: node) }
+            DispatchQueue.main.async { [weak self] in self?.renameController.beginEditing(node: node) }
         }
 
         @objc private func beginRenameWorkspaceNotified() {
             guard let id = store.currentWorkspaceID, let node = nodeCache[id] else { return }
-            DispatchQueue.main.async { [weak self] in self?.beginEditing(node: node) }
+            DispatchQueue.main.async { [weak self] in self?.renameController.beginEditing(node: node) }
         }
 
         /// Expand every workspace in this window's sidebar. A graceful no-op in flagged mode (no workspace
@@ -490,14 +270,14 @@ struct WorkspaceSidebar: NSViewRepresentable {
         /// The session's own agent-status indicator (or `.idle` for an unknown id / workspace row). Shown
         /// on every session regardless of selection — `completed --auto-reset` clears itself on
         /// `selectSession`, so a visited session drops its glyph without a render-time gate.
-        private func effectiveIndicator(forSession id: UUID) -> AgentIndicator {
+        func effectiveIndicator(forSession id: UUID) -> AgentIndicator {
             store.session(withID: id)?.agentIndicator ?? AgentIndicator()
         }
 
         /// The unseen-count after the badge-visibility gate: 0 (hidden) when the Settings badge toggle
         /// is off, else the raw count. Render-only — `unseenCount` keeps tracking, so re-enabling the
         /// toggle instantly shows the current counts. The agent-status glyph is NOT gated by this.
-        private func effectiveUnseen(_ count: Int) -> Int {
+        func effectiveUnseen(_ count: Int) -> Int {
             GhosttyApp.shared.notificationBadgeEnabled ? count : 0
         }
 
@@ -538,7 +318,7 @@ struct WorkspaceSidebar: NSViewRepresentable {
         /// just that row at its stable frame, so a name/cwd update never re-lays-out the whole tree.
         /// Skipped mid-rename so it can't drop an in-progress edit.
         private func reloadChangedContentRows() {
-            guard let outline = outlineView, !committing, !editing else { return }
+            guard let outline = outlineView, !renameController.isCommitting, !renameController.isEditing else { return }
             func reloadIfChanged(_ id: UUID, _ content: RowContent) {
                 guard content != lastRowContent[id] else { return }
                 lastRowContent[id] = content
@@ -778,7 +558,7 @@ struct WorkspaceSidebar: NSViewRepresentable {
         /// Skipped while a rename field is the first responder or an edit is in progress.
         func focusActiveTerminal(attempt: Int = 0) {
             // never steal focus from an in-progress rename.
-            if editing { return }
+            if renameController.isEditing { return }
             let window = outlineView?.window
             if let window, window.firstResponder is NSText { return }
             if let window, let surface = store.activeSession?.surface as? GhosttySurfaceView, surface.window === window {
@@ -810,84 +590,6 @@ struct WorkspaceSidebar: NSViewRepresentable {
             return node.kind == .workspace
         }
 
-        // MARK: - NSOutlineViewDelegate
-
-        func outlineView(_ outlineView: NSOutlineView, isGroupItem item: Any) -> Bool {
-            false
-        }
-
-        func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
-            guard let node = item as? SidebarNode else { return false }
-            return node.kind == .session
-        }
-
-        func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
-            let identifier = NSUserInterfaceItemIdentifier("sidebar-row")
-            if let reused = outlineView.makeView(withIdentifier: identifier, owner: self) as? SidebarRowView { return reused }
-            let view = SidebarRowView()
-            view.identifier = identifier
-            return view
-        }
-
-        func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
-            guard let node = item as? SidebarNode else { return nil }
-            let identifier = NSUserInterfaceItemIdentifier(node.kind == .workspace ? "workspace-cell" : "session-cell")
-            let cell = (outlineView.makeView(withIdentifier: identifier, owner: self) as? SidebarCellView) ?? makeCell(identifier: identifier)
-
-            let field = cell.textField!
-            field.delegate = self
-            // a reused cell may carry editing state from a prior rename; reset to label
-            field.isEditable = false
-            field.isBordered = false
-            field.drawsBackground = false
-            // a recycled cell may carry the prior row's badge/status; reset before use
-            applyBadge(toCell: cell, count: 0)
-            cell.statusIcon.apply(AgentIndicator())
-            switch node.kind {
-            case .workspace:
-                let workspace = store.workspaces.first(where: { $0.id == node.id })
-                field.stringValue = workspace?.name ?? ""
-                field.font = .preferredFont(forTextStyle: .headline)
-                field.setAccessibilityIdentifier("workspace-row")
-                // expose the workspace name so app.staticTexts["workspace 1"] resolves
-                field.setAccessibilityLabel(workspace?.name ?? "")
-                // roll-up badge so an unseen notification stays visible when the workspace is collapsed
-                // (gated by the Settings badge toggle, like the session badge below)
-                applyBadge(toCell: cell, count: effectiveUnseen(workspace?.unseenCount ?? 0))
-                cell.imageView?.image = workspaceIcon
-                cell.imageView?.setAccessibilityIdentifier("workspace-icon")
-            case .session:
-                field.stringValue = rowLabel(forSession: node.id)
-                field.font = .preferredFont(forTextStyle: .body)
-                field.setAccessibilityIdentifier("session-row")
-                field.setAccessibilityLabel(nil)
-                let session = store.session(withID: node.id)
-                applyBadge(toCell: cell, count: effectiveUnseen(session?.unseenCount ?? 0))
-                // gate the agent-status glyph: hidden for the frontmost window's selected session.
-                cell.statusIcon.apply(effectiveIndicator(forSession: node.id))
-                // a session with a split shows the split-rectangle icon (matching the toolbar split
-                // button) in BOTH modes so it stays distinguishable at a glance; `hasSplit` keeps it while
-                // merely hidden. only the filled `flagged` variant is tree-mode only — in the flat flagged
-                // view every row is flagged, so the fill marker would be noise.
-                let showSplitIcon = session?.hasSplit == true
-                let flagged = store.sidebarMode == .tree && session?.flagged == true
-                cell.imageView?.image = iconForSession(split: showSplitIcon, flagged: flagged)
-                cell.imageView?.setAccessibilityIdentifier("session-icon")
-            }
-            // text/icon colors track the terminal theme; a selected row uses the selection foreground.
-            // refreshSelectionAppearance re-runs this for all rows on selection and theme changes.
-            let selected = outlineView.selectedRowIndexes.contains(outlineView.row(forItem: item))
-            cell.setColors(selected: selected)
-            return cell
-        }
-
-        /// Shows the unseen-notification `count` capsule on the row (hidden, zero-width when 0, so the
-        /// name reclaims the space). The `notify-badge` accessibility hook lives on `BadgeView`.
-        private func applyBadge(toCell cell: SidebarCellView, count: Int) {
-            cell.badge.isHidden = count == 0
-            cell.badge.count = count
-        }
-
         /// Leading row icons: a 2x2 grid glyph for a workspace, an outlined terminal for a single
         /// session, and a split-rectangle for a split session, rendered as monochrome template symbols.
         /// The two `flagged*` variants swap to the `.fill` SF Symbol (a solid interior — the same
@@ -895,23 +597,11 @@ struct WorkspaceSidebar: NSViewRepresentable {
         /// single session, `rectangle.split.2x1.fill` for a split. A pure symbol swap, not a composited
         /// corner badge, so it stays a single template `setColors` tints and reserves no extra space.
         /// Cached because only a few distinct symbols exist and every row reuses them.
-        private lazy var workspaceIcon = Self.rowIcon("square.grid.2x2")
-        private lazy var splitSessionIcon = Self.rowIcon("rectangle.split.2x1")
-        private lazy var sessionIcon = Self.rowIcon("terminal")
-        private lazy var flaggedSessionIcon = Self.rowIcon("terminal.fill")
-        private lazy var flaggedSplitSessionIcon = Self.rowIcon("rectangle.split.2x1.fill")
-
-        /// The leading icon for a session row: the split-rectangle when split, the plain terminal
-        /// otherwise, each swapped to its filled variant when `flagged`. The filled variant is
-        /// tree-mode only (the caller passes `flagged: false` in the flat flagged view).
-        private func iconForSession(split: Bool, flagged: Bool) -> NSImage? {
-            switch (split, flagged) {
-            case (true, true): return flaggedSplitSessionIcon
-            case (true, false): return splitSessionIcon
-            case (false, true): return flaggedSessionIcon
-            case (false, false): return sessionIcon
-            }
-        }
+        lazy var workspaceIcon = Self.rowIcon("square.grid.2x2")
+        lazy var splitSessionIcon = Self.rowIcon("rectangle.split.2x1")
+        lazy var sessionIcon = Self.rowIcon("terminal")
+        lazy var flaggedSessionIcon = Self.rowIcon("terminal.fill")
+        lazy var flaggedSplitSessionIcon = Self.rowIcon("rectangle.split.2x1.fill")
 
         private static func rowIcon(_ symbolName: String) -> NSImage? {
             let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
@@ -921,459 +611,14 @@ struct WorkspaceSidebar: NSViewRepresentable {
             return image
         }
 
-        /// Builds a view-based outline cell: an `SidebarCellView` with a leading icon
-        /// (`cell.imageView`), the name `NSTextField` (`cell.textField`, editable on demand by
-        /// `beginEditing`), and a trailing notification badge. The name hugs and resists compression
-        /// weakly while the icon and badge hug and resist strongly, so the name truncates first and
-        /// the icon and badge stay whole.
-        private func makeCell(identifier: NSUserInterfaceItemIdentifier) -> SidebarCellView {
-            let cell = SidebarCellView()
-            cell.identifier = identifier
-
-            let icon = NSImageView()
-            icon.translatesAutoresizingMaskIntoConstraints = false
-            icon.imageScaling = .scaleProportionallyUpOrDown
-            icon.contentTintColor = .secondaryLabelColor
-            icon.setContentHuggingPriority(.required, for: .horizontal)
-            icon.setContentCompressionResistancePriority(.required, for: .horizontal)
-            cell.addSubview(icon)
-            cell.imageView = icon
-
-            let field = NSTextField(labelWithString: "")
-            field.translatesAutoresizingMaskIntoConstraints = false
-            field.lineBreakMode = .byTruncatingTail
-            field.isEditable = false
-            field.isBordered = false
-            field.drawsBackground = false
-            field.focusRingType = .none
-            field.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            cell.addSubview(field)
-            cell.textField = field
-
-            let statusIcon = cell.statusIcon
-            statusIcon.translatesAutoresizingMaskIntoConstraints = false
-            statusIcon.setContentHuggingPriority(.required, for: .horizontal)
-            statusIcon.setContentCompressionResistancePriority(.required, for: .horizontal)
-            cell.addSubview(statusIcon)
-
-            let badge = cell.badge
-            badge.translatesAutoresizingMaskIntoConstraints = false
-            badge.setContentHuggingPriority(.required, for: .horizontal)
-            badge.setContentCompressionResistancePriority(.required, for: .horizontal)
-            cell.addSubview(badge)
-
-            NSLayoutConstraint.activate([
-                icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
-                icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                icon.widthAnchor.constraint(equalToConstant: 16),
-                icon.heightAnchor.constraint(equalToConstant: 16),
-                field.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
-                field.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                // chain: name (flex) | status icon | badge (trailing). the status icon and badge hug
-                // their content, so the name truncates first and both stay whole.
-                field.trailingAnchor.constraint(equalTo: statusIcon.leadingAnchor, constant: -6),
-                statusIcon.trailingAnchor.constraint(equalTo: badge.leadingAnchor),
-                statusIcon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                // width is owned by StatusIconView (0 when idle, glyph-width otherwise) so an idle row
-                // reclaims the slot; only the height is pinned here.
-                statusIcon.heightAnchor.constraint(equalToConstant: 16),
-                badge.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -2),
-                badge.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            ])
-            return cell
-        }
-
-        /// The row's label: the session `displayName` in tree mode, or `session : workspace` (the session
-        /// name then its owning workspace name) in the flat flagged view, so a flagged row from a different
-        /// workspace stays distinguishable. The cell path (`cellForRow`) only has the node id, so it resolves
-        /// the session by id (and the workspace only in flagged mode, where the name is shown — tree mode
-        /// skips that O(n) scan); the reconcile path passes the already-loaded session + name (see
-        /// `rowLabel(for:workspaceName:)`) to stay off the O(n) lookups.
-        private func rowLabel(forSession id: UUID) -> String {
-            guard let session = store.session(withID: id) else { return "" }
-            let workspaceName = store.sidebarMode == .flagged ? store.workspace(forSession: id)?.name ?? "" : ""
-            return rowLabel(for: session, workspaceName: workspaceName)
-        }
-
         /// The row label from an already-resolved session + its owning workspace name, with no store lookup —
         /// the form the reconcile loops use (they iterate the `workspace … session` tree).
-        private func rowLabel(for session: Session, workspaceName: String) -> String {
+        func rowLabel(for session: Session, workspaceName: String) -> String {
             guard store.sidebarMode == .flagged else { return session.displayName }
             return "\(session.displayName) : \(workspaceName)"
         }
 
-        // MARK: - Inline rename
-
-        /// Puts the row's text field into editing mode and focuses it. Called from
-        /// the "Rename" menu item and from double-click.
-        private func beginEditing(node: SidebarNode) {
-            guard let outline = outlineView else { return }
-            let row = outline.row(forItem: node)
-            guard row >= 0, let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: true) as? NSTableCellView,
-                  let field = cell.textField else { return }
-            renameOriginalValue = field.stringValue
-            field.isEditable = true
-            field.isBordered = true
-            field.drawsBackground = true
-            // the editable field draws its own background, and the label color was set to the row's
-            // (often dark) selection-foreground — leaving those makes the edit text unreadable (dark-on-
-            // dark) on every theme. paint the field with the terminal theme's foreground-on-background so
-            // it reads everywhere; setColors restores the row's color when it reloads after the commit.
-            let theme = GhosttyApp.shared
-            field.textColor = theme.terminalForegroundColor ?? .labelColor
-            field.backgroundColor = theme.terminalBackgroundColor ?? .textBackgroundColor
-            field.setAccessibilityIdentifier("edit-field")
-            field.window?.makeFirstResponder(field)
-            editing = true
-        }
-
-        /// Intercepts Esc during an inline rename. The field is focused via `makeFirstResponder`
-        /// (not the outline's edit session), so AppKit never delivers the cancel text-movement for
-        /// Esc — `cancelOperation:` would otherwise do nothing and leave the field stuck in edit
-        /// mode. Flag the cancel, resign so `controlTextDidEndEditing` fires, and consume the
-        /// command so the default (no-op) handling doesn't run.
-        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            guard editing, commandSelector == #selector(NSResponder.cancelOperation(_:)),
-                  let field = control as? NSTextField else { return false }
-            cancellingRename = true
-            field.window?.makeFirstResponder(outlineView)
-            return true
-        }
-
-        func controlTextDidEndEditing(_ notification: Notification) {
-            guard !committing, let field = notification.object as? NSTextField, let outline = outlineView else { return }
-            committing = true
-            defer { committing = false }
-
-            // resolve which node this field belongs to via the row of its cell view
-            let row = outline.row(for: field)
-            let node = row >= 0 ? outline.item(atRow: row) as? SidebarNode : nil
-
-            // Escape cancels: via AppKit's cancel text-movement, or via our Esc handler's flag (the
-            // manual-resign path the rename field needs, since it never gets the cancel movement).
-            let movement = (notification.userInfo?["NSTextMovement"] as? Int) ?? 0
-            let cancelled = movement == NSTextMovement.cancel.rawValue || cancellingRename
-            cancellingRename = false
-
-            let newValue = field.stringValue
-            // a manual-resign cancel keeps the edited stringValue and makes no model change (no row
-            // reload), so restore the pre-edit label before flipping the field back to a plain label.
-            if cancelled, let original = renameOriginalValue { field.stringValue = original }
-            restore(field: field, kind: node?.kind)
-            // a rename ends with focus on the field editor; hand it back to the active terminal so the
-            // sidebar never keeps keyboard focus (the design contract). deferred so the editor's resign
-            // settles first — focusActiveTerminal bails while an NSText field editor is first responder.
-            DispatchQueue.main.async { [weak self] in self?.focusActiveTerminal() }
-            guard let node, !cancelled else { return }
-
-            switch node.kind {
-            case .session: store.renameSession(node.id, to: newValue)
-            case .workspace: store.renameWorkspace(node.id, to: newValue)
-            }
-        }
-
-        /// Returns a renamed/edited field to its non-editable label state and resets
-        /// its accessibility identifier to the row identifier for its kind.
-        private func restore(field: NSTextField, kind: SidebarNode.Kind?) {
-            editing = false
-            field.isEditable = false
-            field.isBordered = false
-            field.drawsBackground = false
-            field.setAccessibilityIdentifier(kind == .workspace ? "workspace-row" : "session-row")
-            // beginEditing painted the field with the theme fg-on-bg for the edit box; restore the row's
-            // selection-aware themed color so a commit that didn't change the name (no reload) doesn't
-            // leave the edit color stuck on the row.
-            if let outline = outlineView, let cell = field.superview as? SidebarCellView {
-                let row = outline.row(for: field)
-                cell.setColors(selected: row >= 0 && outline.selectedRowIndexes.contains(row))
-            }
-        }
-
-        // MARK: - Context menu
-
-        @objc func handleDoubleClick(_ sender: NSOutlineView) {
-            let row = sender.clickedRow
-            guard row >= 0, let node = sender.item(atRow: row) as? SidebarNode else { return }
-            beginEditing(node: node)
-        }
-
-        /// Builds the per-row context menu. Resolves the clicked row lazily so the
-        /// same menu serves every row.
-        func menu(forRow row: Int) -> NSMenu? {
-            guard let outline = outlineView, row >= 0, let node = outline.item(atRow: row) as? SidebarNode else { return nil }
-            let menu = NSMenu()
-            // manage enabled state explicitly (the Delete item is disabled at the last workspace)
-            // rather than via the responder-chain auto-enabling.
-            menu.autoenablesItems = false
-
-            // "Clear Status" sits first for a session row that has a status to clear (same effect as
-            // `agtermctl session status idle`).
-            if node.kind == .session, store.session(withID: node.id)?.agentIndicator.status != .idle {
-                let clearStatus = NSMenuItem(title: "Clear Status", action: #selector(menuClearStatus(_:)), keyEquivalent: "")
-                clearStatus.target = self
-                clearStatus.representedObject = node
-                menu.addItem(clearStatus)
-                menu.addItem(.separator())
-            }
-
-            let rename = NSMenuItem(title: "Rename", action: #selector(menuRename(_:)), keyEquivalent: "")
-            rename.target = self
-            rename.representedObject = node
-            menu.addItem(rename)
-
-            switch node.kind {
-            case .session:
-                let targets = store.workspaces.filter { $0.id != ownerWorkspaceID(ofSession: node.id) }
-                if !targets.isEmpty {
-                    let moveTo = NSMenuItem(title: "Move to", action: nil, keyEquivalent: "")
-                    let submenu = NSMenu()
-                    for target in targets {
-                        let item = NSMenuItem(title: target.name, action: #selector(menuMove(_:)), keyEquivalent: "")
-                        item.target = self
-                        item.representedObject = MoveRequest(sessionID: node.id, targetID: target.id)
-                        submenu.addItem(item)
-                    }
-                    moveTo.submenu = submenu
-                    menu.addItem(moveTo)
-                }
-                // "Flag"/"Unflag" toggles the session's flagged working-set membership; the label
-                // reflects the current state.
-                let flagged = store.session(withID: node.id)?.flagged == true
-                let flag = NSMenuItem(title: flagged ? "Unflag" : "Flag", action: #selector(menuToggleFlag(_:)), keyEquivalent: "")
-                flag.target = self
-                flag.representedObject = node
-                menu.addItem(flag)
-                let close = NSMenuItem(title: "Close Session", action: #selector(menuClose(_:)), keyEquivalent: "")
-                close.target = self
-                close.representedObject = node
-                menu.addItem(close)
-            case .workspace:
-                let newSession = NSMenuItem(title: "New Session", action: #selector(menuNewSession(_:)), keyEquivalent: "")
-                newSession.target = self
-                newSession.representedObject = node
-                menu.addItem(newSession)
-                let openSession = NSMenuItem(title: "Open Directory…", action: #selector(menuOpenSession(_:)), keyEquivalent: "")
-                openSession.target = self
-                openSession.representedObject = node
-                menu.addItem(openSession)
-                // "Focus"/"Unfocus" collapses the tree to this workspace's subtree (or restores all when it
-                // is already the focused one); the label reflects the current state.
-                let focused = store.focusedWorkspaceID == node.id
-                let focus = NSMenuItem(title: focused ? "Unfocus" : "Focus", action: #selector(menuFocusWorkspace(_:)), keyEquivalent: "")
-                focus.target = self
-                focus.representedObject = node
-                menu.addItem(focus)
-                menu.addItem(.separator())
-                let delete = NSMenuItem(title: "Delete Workspace", action: #selector(menuDeleteWorkspace(_:)), keyEquivalent: "")
-                delete.target = self
-                delete.representedObject = node
-                delete.isEnabled = store.canRemoveWorkspace
-                menu.addItem(delete)
-            }
-            return menu
-        }
-
-        private func ownerWorkspaceID(ofSession id: UUID) -> UUID? {
-            store.workspaces.first(where: { ws in ws.sessions.contains(where: { $0.id == id }) })?.id
-        }
-
-        /// Wraps a move command so a `Move to ▸ <ws>` item can carry both ids.
-        private final class MoveRequest {
-            let sessionID: UUID
-            let targetID: UUID
-            init(sessionID: UUID, targetID: UUID) {
-                self.sessionID = sessionID
-                self.targetID = targetID
-            }
-        }
-
-        @objc private func menuRename(_ sender: NSMenuItem) {
-            guard let node = sender.representedObject as? SidebarNode else { return }
-            beginEditing(node: node)
-        }
-
-        @objc private func menuMove(_ sender: NSMenuItem) {
-            guard let request = sender.representedObject as? MoveRequest else { return }
-            store.moveSession(request.sessionID, toWorkspace: request.targetID)
-        }
-
-        @objc private func menuClose(_ sender: NSMenuItem) {
-            guard let node = sender.representedObject as? SidebarNode else { return }
-            store.closeSession(node.id)
-        }
-
-        @objc private func menuClearStatus(_ sender: NSMenuItem) {
-            guard let node = sender.representedObject as? SidebarNode else { return }
-            store.setAgentIndicator(AgentIndicator(), forSession: node.id)
-        }
-
-        @objc private func menuToggleFlag(_ sender: NSMenuItem) {
-            guard let node = sender.representedObject as? SidebarNode else { return }
-            actions.toggleFlag(node.id)
-        }
-
-        @objc private func menuNewSession(_ sender: NSMenuItem) {
-            guard let node = sender.representedObject as? SidebarNode else { return }
-            // resolve the cwd via the same new-session-directory setting as AppActions.newSession(), so the
-            // workspace-row New Session honors it too (home / current session's cwd / a fixed custom dir).
-            addSession(toWorkspace: node.id, cwd: actions.resolvedNewSessionCwd())
-        }
-
-        @objc private func menuDeleteWorkspace(_ sender: NSMenuItem) {
-            guard let node = sender.representedObject as? SidebarNode else { return }
-            actions.deleteWorkspace(node.id)
-        }
-
-        @objc private func menuFocusWorkspace(_ sender: NSMenuItem) {
-            guard let node = sender.representedObject as? SidebarNode else { return }
-            actions.focusWorkspace(node.id)
-        }
-
-        /// "Open Directory…": pick a folder and add a session rooted there.
-        @objc private func menuOpenSession(_ sender: NSMenuItem) {
-            guard let node = sender.representedObject as? SidebarNode else { return }
-            openDirectoryAndAddSession(toWorkspace: node.id)
-        }
-
-        /// Adds a session to `workspaceID` at `cwd` and selects it.
-        private func addSession(toWorkspace workspaceID: UUID, cwd: String) {
-            if let session = store.addSession(toWorkspace: workspaceID, cwd: cwd) {
-                store.selectSession(session.id)
-                actions.focusActiveSession()
-            }
-        }
-
-        private func openDirectoryAndAddSession(toWorkspace workspaceID: UUID) {
-            let panel = NSOpenPanel()
-            panel.canChooseDirectories = true
-            panel.canChooseFiles = false
-            panel.allowsMultipleSelection = false
-            panel.prompt = "Open"
-            panel.message = "Choose a directory for the new session"
-            guard panel.runModal() == .OK, let url = panel.url else { return }
-            addSession(toWorkspace: workspaceID, cwd: url.path)
-        }
-
-        // MARK: - Drag and drop
-
-        func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
-            // the flat flagged view is a derived projection, not a reorderable tree — no drag source there.
-            guard store.sidebarMode == .tree, let node = item as? SidebarNode else { return nil }
-            let pbItem = NSPasteboardItem()
-            switch node.kind {
-            case .session:
-                pbItem.setString(node.id.uuidString, forType: sessionPasteboardType)
-            case .workspace:
-                pbItem.setString(node.id.uuidString, forType: workspacePasteboardType)
-            }
-            return pbItem
-        }
-
-        func outlineView(_ outlineView: NSOutlineView,
-                         validateDrop info: NSDraggingInfo,
-                         proposedItem item: Any?,
-                         proposedChildIndex index: Int) -> NSDragOperation {
-            if draggedWorkspaceID(from: info) != nil {
-                guard let move = resolveWorkspaceMove(from: info, in: outlineView) else { return [] }
-                // workspace reorder lives at the top level: highlight a between-rows slot under the root.
-                outlineView.setDropItem(nil, dropChildIndex: move.dropChildIndex)
-                return .move
-            }
-            guard let move = resolveSessionMove(from: info, item: item, childIndex: index) else { return [] }
-            // redraw the drop highlight on the target workspace row at the resolved insert slot.
-            outlineView.setDropItem(workspaceNode(forID: move.workspace), dropChildIndex: move.dropChildIndex)
-            return .move
-        }
-
-        func outlineView(_ outlineView: NSOutlineView,
-                         acceptDrop info: NSDraggingInfo,
-                         item: Any?,
-                         childIndex index: Int) -> Bool {
-            if draggedWorkspaceID(from: info) != nil {
-                guard let move = resolveWorkspaceMove(from: info, in: outlineView) else { return false }
-                store.moveWorkspace(move.workspaceID, at: move.destination)
-                return true
-            }
-            guard let move = resolveSessionMove(from: info, item: item, childIndex: index) else { return false }
-            store.moveSession(move.sessionID, toWorkspace: move.workspace, at: move.destination)
-            return true
-        }
-
-        /// The resolved session drop. `dropChildIndex` is the PRE-removal slot to highlight; `destination`
-        /// is the POST-removal index `moveSession` expects.
-        private struct SessionMove {
-            let sessionID: UUID
-            let workspace: UUID
-            let dropChildIndex: Int
-            let destination: Int
-        }
-
-        /// Resolves a proposed session drop into the move it would perform, or nil when the drop is
-        /// invalid or a no-op (so both `validateDrop` and `acceptDrop` agree exactly). Reads the pasteboard
-        /// + store to map the dragged session and drop-target row to indices, then defers the index
-        /// arithmetic (drop-on-row redirect, post-removal off-by-one, no-op detection) to the host-free
-        /// `SidebarDrop.resolveSession`.
-        private func resolveSessionMove(from info: NSDraggingInfo, item: Any?, childIndex index: Int) -> SessionMove? {
-            guard let sessionID = draggedSessionID(from: info), let node = item as? SidebarNode,
-                  let source = store.sessionLocation(ofSession: sessionID) else { return nil }
-
-            let target: SidebarDrop.SessionDropTarget
-            switch node.kind {
-            case .workspace:
-                let count = store.workspaces.first(where: { $0.id == node.id })?.sessions.count ?? 0
-                target = .workspaceRow(id: node.id, sessionCount: count)
-            case .session:
-                guard let drop = store.sessionLocation(ofSession: node.id) else { return nil }
-                target = .sessionRow(workspace: drop.workspace, sessionIndex: drop.index, sessionCount: drop.count)
-            }
-
-            guard let move = SidebarDrop.resolveSession(sourceWorkspace: source.workspace, sourceIndex: source.index,
-                                                        target: target, childIndex: index) else { return nil }
-            return SessionMove(sessionID: sessionID, workspace: move.workspace,
-                               dropChildIndex: move.dropChildIndex, destination: move.destination)
-        }
-
-        /// Resolves a workspace drop into the top-level reorder it would perform, or nil when it is a no-op
-        /// (so `validateDrop` and `acceptDrop` agree exactly). A workspace reorder is a TOP-LEVEL move, but
-        /// with workspaces expanded their sessions fill the gaps between workspace rows, so `NSOutlineView`
-        /// only ever proposes drops INTO a workspace's children (`item != nil`) — never the clean root
-        /// between-rows slot — making the reorder impossible from the proposed `item`/`childIndex` alone.
-        /// Derive the insert slot from the cursor Y against the workspace ROWS' midpoints instead (sessions
-        /// ignored): the slot is the count of workspace rows whose midpoint sits above the cursor, so the
-        /// top half of a row drops before it and the bottom half after it. The index arithmetic (post-removal
-        /// off-by-one, no-op detection) defers to the host-free `SidebarDrop.resolveWorkspace`.
-        private func resolveWorkspaceMove(from info: NSDraggingInfo, in outlineView: NSOutlineView)
-            -> (workspaceID: UUID, dropChildIndex: Int, destination: Int)? {
-            guard let workspaceID = draggedWorkspaceID(from: info),
-                  let sourceIndex = store.workspaces.firstIndex(where: { $0.id == workspaceID }) else { return nil }
-            let point = outlineView.convert(info.draggingLocation, from: nil)
-            var insertIndex = 0
-            for (i, workspace) in store.workspaces.enumerated() {
-                guard let node = workspaceNode(forID: workspace.id) else { continue }
-                let row = outlineView.row(forItem: node)
-                guard row >= 0 else { continue }
-                // the outline is flipped (y increases downward): a cursor below a row's midpoint lands after it.
-                if point.y > outlineView.rect(ofRow: row).midY { insertIndex = i + 1 }
-            }
-            guard let move = SidebarDrop.resolveWorkspace(sourceIndex: sourceIndex, count: store.workspaces.count,
-                                                          childIndex: insertIndex) else { return nil }
-            return (workspaceID, move.dropChildIndex, move.destination)
-        }
-
-        /// Reads the dragged workspace id from the pasteboard.
-        private func draggedWorkspaceID(from info: NSDraggingInfo) -> UUID? {
-            guard let string = info.draggingPasteboard.string(forType: workspacePasteboardType) else { return nil }
-            return UUID(uuidString: string)
-        }
-
-        /// Reads the dragged session id from the pasteboard.
-        private func draggedSessionID(from info: NSDraggingInfo) -> UUID? {
-            guard let string = info.draggingPasteboard.string(forType: sessionPasteboardType) else { return nil }
-            return UUID(uuidString: string)
-        }
-
-        private func workspaceNode(forID id: UUID) -> SidebarNode? {
+        func workspaceNode(forID id: UUID) -> SidebarNode? {
             roots.first(where: { $0.id == id })
         }
     }

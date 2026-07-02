@@ -1,6 +1,8 @@
 ---
 paths:
-  - "agterm/Views/WorkspaceSidebar.swift"
+  - "agterm/Views/WorkspaceSidebar*.swift"
+  - "agterm/Views/SidebarRowViews.swift"
+  - "agterm/Views/SidebarRenameController.swift"
   - "agtermCore/Sources/agtermCore/SidebarDrop.swift"
   - "agtermCore/Sources/agtermCore/SidebarMode.swift"
   - "agtermCore/Sources/agtermCore/Reorder.swift"
