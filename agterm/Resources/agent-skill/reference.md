@@ -261,6 +261,13 @@ attributed to a session (default: the active session of the frontmost window). `
 the session name. Clicking the banner reveals that session. This is the only app-level way to post a
 banner (the terminal's own OSC 9/777 is the other source). Control-native (no GUI/menu equivalent).
 
+For agentic attention (waiting on input, or a finished result), prefer `session status` over `notify`
+and OSC 9/777. The two overlap, either can raise an "I need you" signal, but a notification is a
+one-shot banner and badge with no lasting state, while `session status` is a typed, persistent state
+(`active`/`blocked`/`completed`) that stays on the row until acted on, is more precise, and drives the
+attention list, the title-bar bell, and attention navigation (`session go --to next-attention`). Keep
+`notify` for a one-off nudge that needs no follow-up.
+
 ## font
 
 `agtermctl font inc|dec|reset [--target] [--window W]` — increase / decrease / reset the font size on

@@ -137,7 +137,7 @@ agterm arranges terminals into a small hierarchy. These are the only terms you n
 
 **Flagging and focus.** Two ways to cut down a busy sidebar. Flag a few sessions from different workspaces to get a flat working-set view of just those; a flag is durable and survives a move. Focus a single workspace to hide the others, with a one-click way back. The two are independent.
 
-**Notifications.** A program in any session can raise a desktop notification (via OSC 9 / 777, or the control API). It shows as a banner and a count badge on the session's row; clicking the banner jumps to the exact pane that raised it.
+**Notifications.** A program in any session can raise a desktop notification (via OSC 9 / 777, or the control API). It shows as a banner and a count badge on the session's row; clicking the banner jumps to the exact pane that raised it. For a coding agent that just needs to say it is waiting on you, [Agent status](#agent-status) is usually the better fit.
 
 **Agent status.** A coding agent in a session can report its state (active, blocked, completed) onto that session's row, so a screen of concurrent agents shows which one needs you. See [Agent status](#agent-status) for wiring it up.
 
@@ -356,6 +356,8 @@ Open the file with **File ▸ Edit ghostty.conf…** or the ⌃⇧P palette ("Ed
 A coding agent running in a session can flag its status on that session's sidebar row, so you can tell at a glance which of many concurrent agents needs you. The status shows as a small tinted SF Symbol just left of the notification badge: `active` is a blue ellipsis, `blocked` an amber exclamation, `completed` a green check, and `idle` is nothing. The glyph shows on every non-idle session, the selected one included. A one-time `completed` flash auto-clears once you visit the session.
 
 When the sidebar is hidden the per-session glyphs go with it, so the same signal is available two more ways. An optional **title-bar bell** (turn on **Show attention indicator** in Settings ▸ General ▸ Notifications; off by default) reflects the window at a glance: dimmed when nothing needs attention, plain when a session is active or completed, and a filled amber bell when any session is blocked. Clicking it — or pressing ⌃⇧I, choosing **Navigate ▸ Go to Attention…**, or the action palette's "Show Attention" — opens the **attention list**: a palette of just this window's non-idle sessions, each with its status glyph, sorted blocked → active → completed (newest change first). Enter jumps to the session. Over the control channel, `agtermctl tree --json` now reports each session's `status` (omitted when idle).
+
+For a coding agent this overlaps with a desktop notification: both are ways for a session to get your attention, and in agentic use either can carry the same "I need you" signal, so the two are largely interchangeable. The difference is what stays behind. A notification (OSC 9/777 or `agtermctl notify`) is a one-shot banner and badge with no lasting state. Agent status is a typed, persistent state that stays on the row until you act on it, tells working (`active`) apart from waiting (`blocked`) and finished (`completed`), and powers the attention list, the title-bar bell, and attention navigation (⌃⌥↑/↓). So for an agent flagging that it needs you, prefer agent status: it is more accurate and plugs into the attention UI, while a notification is best kept for a one-off nudge that needs no follow-up.
 
 An agent sets it over the control channel:
 

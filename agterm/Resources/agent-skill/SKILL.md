@@ -153,7 +153,7 @@ workspace tree and the flat flagged working-set list) · `expand [--window W]` (
 Visibility/mode act on the frontmost window; `expand`/`collapse` default to the frontmost but take a
 `--window` selector to target any open window.
 
-**notify** — `notify <body> [--title T]` — post a desktop notification attributed to a session.
+**notify** — `notify <body> [--title T]` — post a desktop notification attributed to a session. To signal that you need the user, prefer `session status` (`blocked`/`completed`), a persistent typed attention state rather than a one-shot banner; keep `notify` for a one-off nudge.
 
 **font** — `font inc|dec|reset` — font size on the focused surface.
 
