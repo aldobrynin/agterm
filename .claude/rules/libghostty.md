@@ -1,6 +1,6 @@
 ---
 paths:
-  - "agterm/Ghostty/GhosttySurfaceView.swift"
+  - "agterm/Ghostty/GhosttySurfaceView*.swift"
   - "agterm/Ghostty/GhosttyApp.swift"
   - "agterm/Ghostty/GhosttyCallbacks.swift"
   - "agterm/Ghostty/GhosttyResources.swift"
