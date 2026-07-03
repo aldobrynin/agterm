@@ -195,6 +195,12 @@ The app must build, `swift test` must stay green, and `make lint` must pass afte
   It is written only at release time (the `docs: update changelog for vX.Y.Z` commit / the release flow).
   A feature's own doc updates go to `README.md`, the bundled `agterm/Resources/agent-skill/`,
   and the relevant `.claude/rules/*.md` note — not the changelog.
+  **At release time, run the new `CHANGELOG.md` version section through the `draft-approval` skill BEFORE
+  writing/committing it** — write the section to a temp file, open it in `draft-review.sh` (revdiff),
+  address annotations, then get an explicit in-chat go-ahead.
+  Do NOT just paste the section inline and ask — `scripts/release.sh` publishes that exact section as the
+  GitHub release body (release.sh:70-85), so it is outward-facing text and gets the full draft-approval/revdiff
+  flow, same as a `gh`/`glab` comment.
 
 ## GhosttyKit.xcframework
 
