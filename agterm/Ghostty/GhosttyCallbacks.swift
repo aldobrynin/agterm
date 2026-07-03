@@ -141,19 +141,66 @@ final class GhosttyCallbacks: @unchecked Sendable {
     /// Pasted text from the general clipboard (the libghostty paste callback).
     static func readPasteboardText() -> String? { pasteboardText(.general) }
 
-    func confirmReadClipboard(ud: UnsafeMutableRawPointer?, content: UnsafePointer<CChar>?, state: UnsafeMutableRawPointer?) {
-        guard let content else { return }
-        ghostty_surface_complete_clipboard_request(surface(from: ud), content, state, true)
-    }
-
-    func writeClipboard(content: UnsafePointer<ghostty_clipboard_content_s>?, len: UInt) {
-        guard let content, len > 0 else { return }
-        for item in UnsafeBufferPointer(start: content, count: Int(len)) {
-            guard let data = item.data, let mime = item.mime, String(cString: mime).hasPrefix("text/plain") else { continue }
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(String(cString: data), forType: .string)
+    func confirmReadClipboard(ud: UnsafeMutableRawPointer?, content: UnsafePointer<CChar>?, state: UnsafeMutableRawPointer?,
+                              request: ghostty_clipboard_request_e) {
+        // only a real OSC 52 read (a program reading the system clipboard into the terminal stream) is
+        // gated; a paste keeps auto-approving so ⌘V never prompts.
+        guard request == GHOSTTY_CLIPBOARD_REQUEST_OSC_52_READ else {
+            guard let content else { return }
+            ghostty_surface_complete_clipboard_request(surface(from: ud), content, state, true)
             return
         }
+        guard let ud else { return }
+        // capture the VIEW, not the raw surface pointer: a session/window/pane close (or `session.close`
+        // over the control socket) can free the surface via destroySurface() WHILE the sheet is open. We
+        // re-read `view.surface` on the main actor at completion and skip if it's gone (freeing the surface
+        // already discarded its pending request, so there is nothing to complete and no loop). The view
+        // also scopes the prompt's coalescing to this surface.
+        let view = Unmanaged<GhosttySurfaceView>.fromOpaque(ud).takeUnretainedValue()
+        let text = content.map { String(cString: $0) } ?? "" // copy now; nil content reads as empty
+        nonisolated(unsafe) let requestState = state
+        DispatchQueue.main.async {
+            ClipboardPromptController.shared.request(.read, requester: view) { allowed in
+                guard let surface = view.surface else { return }
+                // deny by delivering an EMPTY clipboard with confirmed = true: completing with confirmed =
+                // false leaves the request unconfirmed and libghostty re-asks, looping the dialog.
+                let delivered = allowed ? text : ""
+                delivered.withCString { ghostty_surface_complete_clipboard_request(surface, $0, requestState, true) }
+            }
+        }
+    }
+
+    func writeClipboard(ud: UnsafeMutableRawPointer?, content: UnsafePointer<ghostty_clipboard_content_s>?, len: UInt, confirm: Bool) {
+        guard let content, len > 0 else { return }
+        var text: String?
+        for item in UnsafeBufferPointer(start: content, count: Int(len)) {
+            guard let data = item.data, let mime = item.mime, String(cString: mime).hasPrefix("text/plain") else { continue }
+            text = String(cString: data)
+            break
+        }
+        guard let text else { return }
+        // confirm == false: ghostty's clipboard-write policy already allowed it (the `allow` default). This
+        // callback runs on the main actor (verified), so write SYNCHRONOUSLY — deferring it lets a following
+        // OSC 52 read in the same tick observe the stale clipboard.
+        guard confirm else {
+            Self.setClipboard(text)
+            return
+        }
+        // confirm == true: clipboard-write = ask. Gate behind the user, scoping coalescing to this surface
+        // (the write callback's userdata is the surface, same pointer as the read confirm) so one Allow
+        // can't authorize a different surface's queued write.
+        guard let ud else { return }
+        let view = Unmanaged<GhosttySurfaceView>.fromOpaque(ud).takeUnretainedValue()
+        DispatchQueue.main.async {
+            ClipboardPromptController.shared.request(.write, requester: view) { allowed in
+                if allowed { Self.setClipboard(text) }
+            }
+        }
+    }
+
+    private static func setClipboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     func closeSurface(ud: UnsafeMutableRawPointer?) {
